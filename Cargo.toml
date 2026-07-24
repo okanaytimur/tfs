@@ -1,0 +1,21 @@
+[package]
+name = "tfs"
+version = "0.1.0"
+edition = "2021"
+description = "tfs (terminal-file-send) — fare öncelikli SSH dosya tarayıcısı + modern SSH terminali"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+russh = { version = "0.62", default-features = false, features = ["ring", "flate2", "rsa"] }
+russh-sftp = "2.3"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# tui-term 0.3+ vt100 0.16.2'ye (unicode-width 0.2.1) bağlı; bu ratatui 0.29'un
+# unicode-width =0.2.0 sabiti ile çakışıyor. 0.2.0 + vt100 0.15 (unicode-width
+# 0.1) ise yan yana derleniyor — bu yüzden sabitlendi.
+tui-term = "=0.2.0"
+vt100 = "=0.15.2"

@@ -1,0 +1,17 @@
+{
+  "servers": [
+    {
+      "name": "Prod Sunucu",
+      "host": "1.2.3.4",
+      "port": 22,
+      "user": "okan",
+      "password": "PAROLA_BURAYA"
+    },
+    {
+      "name": "Test (varsayılan port 22)",
+      "host": "test.local",
+      "user": "root",
+      "password": "PAROLA_BURAYA"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# Rust derleme çıktısı
+/target
+
+# Gerçek sunucu parolalarını içerir — ASLA push etme (şablon: config.example.json)
+config.json
+
+# Claude Code yerel ayarları (kullanıcıya özel)
+.claude/settings.local.json
+
+# Teşhis logu (TFS_LOG çıktısı)
+*.log
