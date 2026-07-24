@@ -6,6 +6,23 @@ ratatui + russh + russh-sftp ile:
 
 hepsi tek SSH bağlantısı üzerinden (yeniden bağlanma yok).
 
+## İndir (hazır Windows sürümleri)
+
+Derlemeye gerek yok — [**Releases**](https://github.com/okanaytimur/tfs/releases)
+sayfasından hazır `.exe` indirebilirsiniz:
+
+| Dosya | Mimari | Not |
+|-------|--------|-----|
+| `tfs-vX-windows-x86_64.exe` | 64-bit | Önerilen |
+| `tfs-vX-windows-i686.exe` | 32-bit | Eski/32-bit Windows |
+
+İndirdikten sonra yanına bir `config.json` koyup çalıştırın (bkz. Yapılandırma).
+
+**Platform desteği**: Windows 10 ve üzeri. Windows 7/8 desteklenmez — Rust 1.78'den
+beri standart Windows hedefi Win7'yi bırakmıştır (binary'ler Win10+ ister). Win7
+ancak Tier-3 `*-win7-windows-msvc` hedefi + nightly + `-Z build-std` ile derlenebilir
+(deneysel, kripto/async yığınımızla test edilmedi).
+
 ## Yapılandırma
 
 Sunucular `config.json` dosyasından okunur — birden fazla sunucu, parolalarıyla:
@@ -65,7 +82,8 @@ promptlar ~1 sn bekleyip ekranı sıfırlıyordu.
 - **Tek tık**: dosya seçer; klasöre tıklamak içine girer.
 - **Tekerlek**: seçimi kaydırır.
 - **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin, `↑/↓` gezin, `q` çıkış.
-- **F1**: SSH terminaline geç · **F2**: dosya moduna dön.
+- **F1**: SSH terminaline geç · **F2**: dosya moduna dön. Üst çubuktaki
+  `F1 Terminal` / `F2 Dosya` sekmelerine **fareyle de tıklanabilir**.
 
 ## Sunucu seçme ekranı
 

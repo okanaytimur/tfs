@@ -9,3 +9,6 @@ config.json
 
 # Teşhis logu (TFS_LOG çıktısı)
 *.log
+
+# Release binary'leri (GitHub Releases'e yüklenir, repoda tutulmaz)
+/dist

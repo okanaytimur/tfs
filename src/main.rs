@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, KeyCode, KeyEventKind,
+        Event, EventStream, KeyCode, KeyEventKind, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -177,6 +177,24 @@ async fn run(
                                         continue;
                                     }
                                     _ => {}
+                                }
+                            }
+                        }
+
+                        // Global fare: üst çubuktaki F1/F2 sekmelerine sol tık → mod değiştir.
+                        if let Event::Mouse(m) = &ev {
+                            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                                if let Some(tab) = terminal::hit_tab(m.column, m.row) {
+                                    match tab {
+                                        terminal::Tab::Terminal => {
+                                            screen = Screen::Terminal;
+                                            if term.is_none() {
+                                                pending_open = true;
+                                            }
+                                        }
+                                        terminal::Tab::Files => screen = Screen::FileTransfer,
+                                    }
+                                    continue;
                                 }
                             }
                         }

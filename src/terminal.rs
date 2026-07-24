@@ -23,6 +23,37 @@ use tui_term::widget::PseudoTerminal;
 /// Kaydırma (scrollback) tampon satır sayısı.
 const SCROLLBACK: usize = 1000;
 
+/// Üst çubuktaki sekme etiketleri (fare hit-test'i ile senkron kalması için sabit).
+const TAB_F1: &str = " F1 Terminal ";
+const TAB_GAP: &str = " ";
+const TAB_F2: &str = " F2 Dosya ";
+
+/// Üst çubuktaki tıklanabilir sekmeler.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Terminal,
+    Files,
+}
+
+/// (col,row) üst çubuktaki bir sekmeye denk geliyorsa hangisi? Çubuk her zaman
+/// 0. satırda ve x=0'dan başlar (hem dosya hem terminal modunda aynı düzen).
+pub fn hit_tab(col: u16, row: u16) -> Option<Tab> {
+    if row != 0 {
+        return None;
+    }
+    let f1_w = TAB_F1.chars().count() as u16;
+    let gap_w = TAB_GAP.chars().count() as u16;
+    let f2_w = TAB_F2.chars().count() as u16;
+    let f2_start = f1_w + gap_w;
+    if col < f1_w {
+        Some(Tab::Terminal)
+    } else if col >= f2_start && col < f2_start + f2_w {
+        Some(Tab::Files)
+    } else {
+        None
+    }
+}
+
 /// Interaktif kabuk oturumu: yazma yarısı + VT100 parser + boyut bilgisi.
 /// Okuma yarısı arka plandaki bir task'te; baytlar `open()`'ın döndürdüğü
 /// alıcı (receiver) üzerinden ana döngüye akar.
@@ -289,9 +320,9 @@ pub fn draw_top_bar(f: &mut Frame, area: ratatui::layout::Rect, server_name: &st
     };
 
     let mut spans = vec![
-        Span::styled(" F1 Terminal ", term_style),
-        Span::raw(" "),
-        Span::styled(" F2 Dosya ", files_style),
+        Span::styled(TAB_F1, term_style),
+        Span::raw(TAB_GAP),
+        Span::styled(TAB_F2, files_style),
         Span::raw("  "),
         Span::styled(
             format!("⛁ {server_name}"),

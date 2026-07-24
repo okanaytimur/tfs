@@ -20,9 +20,12 @@ Son güncelleme: 2026-07-25
 > - ✅ GitHub'a atıldı (PUBLIC): https://github.com/okanaytimur/tfs
 >   Paket `sftp_tui` → **tfs** olarak yeniden adlandırıldı (binary `tfs.exe`).
 >   Güvenlik: `config.json` gitignore'lu, uzakta OLMADIĞI doğrulandı.
->   `.claude/settings.local.json` + `*.log` de gitignore'a eklendi.
+> - ✅ Fareyle sekme geçişi (üst çubuktaki F1/F2 tıklanabilir).
+> - ✅ 32-bit (i686) + 64-bit (x86_64) Windows release derlendi → GitHub Releases.
+> - ⛔ Windows 7/8: bilinçli olarak desteklenmiyor (Rust 1.78+ bıraktı; bkz. "## 10.2").
+> - 📌 SONRAKİ: Linux sürümü (bkz. "## 11") — kullanıcı Linux makinada derletecek.
 >
-> Kalan öneriler → "## 9.C". Devam için "## 9" bölümüne bak.
+> Kalan öneriler → "## 9.C". Derleme/dağıtım → "## 10". Devam için ilgili bölüme bak.
 
 ---
 
@@ -290,6 +293,8 @@ düzelmezse ham log'a bak.
 ### 9.C Benim ek önerilerim (öncelikli sıra)
 - ✅ **Yapıştırma** — bracketed paste ile eklendi (arboard'a gerek kalmadı).
 - ✅ **Büyük çıktı performansı** — döngü başında `try_recv` batch besleme eklendi.
+- ✅ **Fareyle sekme geçişi** — üst çubuktaki F1/F2 sekmeleri tıklanabilir
+  (`terminal::hit_tab`, main.rs global mouse yakalama).
 - [ ] **Fareyle metin seçme/kopyalama** (terminalde mouse capture seçimi engelliyor;
   seçimde capture'ı geçici kapat ya da SGR mouse forwarding). Hâlâ yok.
 - [ ] **Güvenlik (eski iskelet borçları)**: `known_hosts` doğrulaması
@@ -297,9 +302,42 @@ düzelmezse ham log'a bak.
 - **Klasör (recursive) transferi** (F2 tarafı — hâlâ sadece tek dosya).
 - **Bağlantı kopunca** nazik yeniden bağlanma / picker'a dönüş.
 
-### 9.D Yarın nereden başla
-> 1. Önce **9.B bug**: ham bayt log'u ekle, reprodüksiyon, diziye bak; muhtemelen
->    resize'ı `Event::Resize`'a bağlayarak çöz.
-> 2. Sonra **9.A GitHub**: güvenlik kontrolü → `git init` → `gh repo create`
->    (kullanıcıya isim/gizlilik sor, commit/push için onay al).
-> 3. Zaman kalırsa **9.C**'den yapıştırma + metin seçme.
+### 9.D (arşiv) İlk gün başlangıç notu — artık geçildi
+> Bug çözüldü (9.B) ve GitHub'a atıldı (bkz. üst özet). Bu madde tarihsel.
+
+---
+
+## 10. Derleme & Dağıtım (2026-07-25)
+
+### 10.1 Windows binary'leri
+- **x86_64 (64-bit)**: `cargo build --release` → `target/release/tfs.exe` (~4.7 MB). ✅
+- **i686 (32-bit)**: `rustup target add i686-pc-windows-msvc` →
+  `cargo build --release --target i686-pc-windows-msvc` →
+  `target/i686-pc-windows-msvc/release/tfs.exe` (~3.8 MB). ✅ (ring/russh sorunsuz derlendi.)
+- Release asset adları: `dist/tfs-v0.1.0-windows-{x86_64,i686}.exe`. `dist/` gitignore'lu.
+
+### 10.2 Windows 7/8 — DESTEKLENMİYOR (bilinçli)
+Rust 1.78+ standart `*-pc-windows-msvc` hedefi Win7/8'i bıraktı; binary Win10+ ister.
+Tek yol Tier-3 `x86_64-win7-windows-msvc` + nightly + `-Z build-std` (deneysel,
+test edilmedi). Kullanıcı kriteri "basitse yap" → yapılmadı. Tarif (istenirse):
+```
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
+```
+
+### 10.3 GitHub Release
+- `gh release create v0.1.0` ile iki `.exe` yüklendi. Repo: okanaytimur/tfs.
+
+## 11. SONRAKİ AŞAMA — Linux sürümü (NOT)
+> Kullanıcı, tüm dosyalarla birlikte bir **Linux makinada** derleme/çalıştırma
+> yaptırmak isteyecek. Beklenen: kod zaten taşınabilir (ratatui/russh/crossterm
+> Linux'ta çalışır). Yapılacaklar:
+> - `cargo build --release` (Linux host) → ELF binary; mouse/paste/terminal
+>   crossterm ile Linux'ta da çalışır.
+> - Kripto backend: `ring` Linux'ta NASM istemez, sorun beklenmez (Windows için
+>   seçilmişti; Linux'ta da uyumlu).
+> - Release'e Linux binary (`tfs-vX-linux-x86_64`) + belki `.tar.gz` eklenebilir.
+> - Cross-compile yerine gerçek Linux'ta derlemek en temizi (glibc uyumu için
+>   mümkünse eski bir dağıtım ya da `x86_64-unknown-linux-musl` ile statik binary).
+> - CI (GitHub Actions) ile Win+Linux otomatik release ileride düşünülebilir.
