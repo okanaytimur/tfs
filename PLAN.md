@@ -17,7 +17,10 @@ Son güncelleme: 2026-07-25
 > - ✅ Yapıştırma (bracketed paste): `EnableBracketedPaste` + `Event::Paste`.
 > - ✅ Toplu besleme (döngü başında `try_recv` drain) — büyük çıktıda az redraw.
 > - ✅ Teşhis logu: `TFS_LOG=yol` env → gelen ham baytlar escape'li loglanır.
-> - ⏳ GitHub'a atma: `gh` hazır (okanaytimur), depo adı **tfs**; gizlilik onayı bekliyor.
+> - ✅ GitHub'a atıldı (PUBLIC): https://github.com/okanaytimur/tfs
+>   Paket `sftp_tui` → **tfs** olarak yeniden adlandırıldı (binary `tfs.exe`).
+>   Güvenlik: `config.json` gitignore'lu, uzakta OLMADIĞI doğrulandı.
+>   `.claude/settings.local.json` + `*.log` de gitignore'a eklendi.
 >
 > Kalan öneriler → "## 9.C". Devam için "## 9" bölümüne bak.
 
