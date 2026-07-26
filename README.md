@@ -6,10 +6,21 @@ ratatui + russh + russh-sftp ile:
 
 hepsi tek SSH bağlantısı üzerinden (yeniden bağlanma yok).
 
-## İndir (hazır Windows sürümleri)
+## Kurulum
 
-Derlemeye gerek yok — [**Releases**](https://github.com/okanaytimur/tfs/releases)
-sayfasından hazır `.exe` indirebilirsiniz:
+### Cargo ile (Rust kuruluysa)
+
+```sh
+cargo install tfs-ssh
+```
+
+> crates.io'da `tfs` adı başkasına ait olduğu için paket adı **`tfs-ssh`**;
+> kurulan komut yine **`tfs`**'tir.
+
+### Hazır Windows sürümleri (derlemeye gerek yok)
+
+[**Releases**](https://github.com/okanaytimur/tfs/releases) sayfasından hazır
+`.exe` indirebilirsiniz:
 
 | Dosya | Mimari | Not |
 |-------|--------|-----|

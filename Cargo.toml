@@ -1,8 +1,19 @@
 [package]
-name = "tfs"
+name = "tfs-ssh"
 version = "0.1.0"
 edition = "2021"
-description = "tfs (terminal-file-send) — fare öncelikli SSH dosya tarayıcısı + modern SSH terminali"
+description = "tfs — fare öncelikli SSH dosya tarayıcısı (F2) + modern SSH terminali (F1). Tek bağlantı, iki mod."
+authors = ["Okan Aytimur"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/okanaytimur/tfs"
+readme = "README.md"
+keywords = ["ssh", "sftp", "terminal", "tui", "file-transfer"]
+categories = ["command-line-utilities", "network-programming"]
+
+# crates.io paket adı `tfs-ssh` (`tfs` alınmış), ama kurulan komut `tfs`.
+[[bin]]
+name = "tfs"
+path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.29"

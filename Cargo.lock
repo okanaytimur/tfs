@@ -2012,7 +2012,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tfs"
+name = "tfs-ssh"
 version = "0.1.0"
 dependencies = [
  "anyhow",
