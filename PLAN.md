@@ -23,6 +23,7 @@ Son güncelleme: 2026-07-25
 > - ✅ Fareyle sekme geçişi (üst çubuktaki F1/F2 tıklanabilir).
 > - ✅ 32-bit (i686) + 64-bit (x86_64) Windows release derlendi → GitHub Releases.
 > - ⛔ Windows 7/8: bilinçli olarak desteklenmiyor (Rust 1.78+ bıraktı; bkz. "## 10.2").
+> - ✅ crates.io'da YAYINDA: `cargo install tfs-ssh` → `tfs` komutu (2026-07-27, doğrulandı).
 > - 📌 SONRAKİ: Linux sürümü (bkz. "## 11") — kullanıcı Linux makinada derletecek.
 >
 > Kalan öneriler → "## 9.C". Derleme/dağıtım → "## 10". Devam için ilgili bölüme bak.
