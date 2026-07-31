@@ -4,7 +4,7 @@
 > bunu oku; "Durum" bölümündeki kutucuklardan (`[ ]` / `[x]`) nerede kaldığımızı
 > gör ve "Sıradaki adım"dan devam et.
 
-Son güncelleme: 2026-07-25
+Son güncelleme: 2026-07-31
 
 > **DURUM: Aşama 0–4 + bug düzeltmeleri tamam, çalışır durumda (clippy temiz).**
 > F1 SSH terminali + F2 dosya transferi entegre edildi.
@@ -24,7 +24,78 @@ Son güncelleme: 2026-07-25
 > - ✅ 32-bit (i686) + 64-bit (x86_64) Windows release derlendi → GitHub Releases.
 > - ⛔ Windows 7/8: bilinçli olarak desteklenmiyor (Rust 1.78+ bıraktı; bkz. "## 10.2").
 > - ✅ crates.io'da YAYINDA: `cargo install tfs-ssh` → `tfs` komutu (2026-07-27, doğrulandı).
-> - 📌 SONRAKİ: Linux sürümü (bkz. "## 11") — kullanıcı Linux makinada derletecek.
+>
+> **2026-07-31 yapılanlar (Aşama 5 TAMAMLANDI, commit'lenmedi):**
+> - ✅ **Fareyle metin seçme + kopyalama**: sürükle → REVERSED vurgu → bırakınca
+>   `arboard` ile panoya. `terminal.rs`: `Selection`, `sel_start/sel_update/
+>   sel_finish_copy`, `selection_span`, `highlight_selection`.
+> - ✅ **Panodan yapıştırma**: sağ tık · `Shift+Insert` · `Ctrl+Shift+V`
+>   (`paste_from_clipboard`). `Ctrl+V` bilinçli olarak kabuğa gidiyor.
+> - ✅ **`send_paste`**: satır sonu `\r` normalizasyonu + uzak taraf bracketed
+>   paste modundaysa `ESC[200~/201~` sarmalama. `Event::Paste` de bunu kullanıyor.
+> - ✅ **Kaydırma tamponu artık erişilebilir**: fare tekerleği + `Shift+PgUp/PgDn`
+>   (`scroll_up/scroll_down/scroll_reset`). 1000 satırlık `SCROLLBACK` şimdiye
+>   kadar ölü sermayeydi. Kaydırınca imleç gizlenir, üst çubukta konum yazar,
+>   tuşa basınca canlıya döner.
+> - ✅ `cargo clippy --all-targets` temiz.
+>
+> **2026-08-01 (kullanıcı testi sonrası düzeltmeler):**
+> - Kullanıcı doğruladı: **sağ tık yapıştırma ve seçimle kopyalama ÇALIŞIYOR.**
+> - 🐞 **Ctrl+V / Ctrl+Shift+V / Shift+Ins harf harf yapıştırıyordu** → ÇÖZÜLDÜ.
+>   Kök neden: crossterm'in `Event::Paste`'i **Windows'ta hiç üretilmez** (eski
+>   konsol API'sinde bracketed paste yok; `EnableBracketedPaste::execute_winapi`
+>   düpedüz `Unsupported` döner). Windows Terminal bu kısayolları kendisi yakalayıp
+>   panoyu tuş tuş enjekte ediyor. Çözüm: `main.rs::drain_key_burst` — ilk
+>   yazılabilir tuştan sonra akışta hazır bekleyen tuşlar toplanıp tek parça
+>   `send_paste` ile gönderiliyor (bracketed paste sarmalı dahil).
+>   Eşikler: `BURST_START_GAP` 2 ms, `BURST_GAP` 15 ms, `BURST_MAX_BYTES` 64 KiB.
+>   İnsan yazımı (≥60 ms, tuş tekrarı ≥30 ms) asla yığın sayılmaz.
+> - ✅ **`config.json` otomatik oluşuyor**: yoksa hata yerine şablon yazılıp tam
+>   yol gösteriliyor ve nazikçe çıkılıyor (`Config::load_or_create` → `Loaded`
+>   enum'u; şablon `include_str!("../config.example.json")` ile gömülü, bu yüzden
+>   `cargo install` ile kurulanda da var). Dosya var ama birebir şablonsa da
+>   bağlanmayı denemeyip kullanıcıyı dosyaya yönlendiriyor. Alt dizinli yol
+>   verilirse dizin de açılıyor.
+> - ✅ **İlk testler eklendi** (`main.rs` `mod tests`, 9 test): yığın toplama
+>   mantığı her tuş vuruşunun yolunda olduğu için zamanlamaya duyarlı kısmı
+>   `tokio::test(start_paused)` ile sanal zamanda doğrulanıyor.
+>   `drain_key_burst` bunun için akış üzerinden generic yapıldı.
+>   Yeni dev-dependency: `tokio` `test-util` (`full` bunu içermiyor).
+> - Elle test edildi: config'in üç hâli (yok / dokunulmamış şablon / bozuk JSON)
+>   + alt dizinli yol. **Yapıştırma yığını gerçek sunucuda test EDİLMEDİ.**
+>
+> **2026-08-01 (2. tur — ilk yığın denemesi ÇALIŞMADI, yeniden tasarlandı):**
+> Kullanıcı test etti: sağ tık hâlâ iyi, ama Ctrl+V/Ctrl+Shift+V/Shift+Ins hâlâ
+> harf harf. İlk tasarımın iki ayrı hatası vardı:
+> - 🐞 **`now_or_never()` crossterm `EventStream` ile KULLANILMAZ.** `poll_next`
+>   Pending dönerken `cx.waker()`'ı saklayıp bir thread'e veriyor ve
+>   `stream_wake_task_executed` bayrağını set ediyor (stream.rs:113-131).
+>   Noop waker verirsek bayrak takılı kalır, **gerçek waker bir daha
+>   kaydedilemez** → ana döngü tuşlara sağır kalabilir (pratikte kabuk echo'su
+>   uyandırdığı için maskeleniyordu). Artık her yoklama `timeout(...)` ile,
+>   yani gerçek waker'la yapılıyor. Olay hazırsa zaten beklemeden dönüyor.
+> - 🐞 **Yığın "başlatma" eşiği 2 ms fazla dardı.** Emülatör karakterleri tek
+>   seferde tamponlamak yerine damla damla enjekte ediyorsa ikinci karakter
+>   2 ms içinde gelmiyor ve yığın hiç başlamıyordu. Yeni tasarım eşiği tek ve
+>   cömert: `BURST_GAP` = 25 ms (tuş tekrarının 32 ms'lik tabanının altında).
+> - Yeni akış: tuş **hemen** gönderilir (yazmaya gecikme yok), sonra devamı
+>   dinlenir → `collect_key_burst` → `TermSession::send_burst`.
+> - `send_burst` yalnızca **çok satırlı** yığını bracketed paste ile sarar:
+>   `vim` normal modunda bracketed paste "yapıştır" demek, dolayısıyla tuş
+>   tekrarı yanlışlıkla yığın sanılsa bile `jjjj` metin olarak yapışmaz.
+> - ✅ Teşhis eklendi: **`TFS_KEYLOG=yol`** → her girdi olayı, öncekinden kaç
+>   mikrosaniye sonra geldiğiyle loglanır + her yığının kaç karakter topladığı.
+>   **Hâlâ harf harf ise ilk iş bu logu almak** — gerçek enjeksiyon aralığını
+>   gösterir, `BURST_GAP` ona göre ayarlanır.
+> - 10 test (yeni: damla damla gelen yapıştırma da toparlanmalı).
+> - ✅ **Kullanıcı doğruladı: yapıştırma artık tek seferde çalışıyor.**
+>   Demek ki kök neden 2 ms'lik dar eşik + noop-waker'dı (ikisi de düzeltildi).
+>
+> **2026-08-01 (3. tur — v0.2.0 yayını):** Sürüm `0.2.0`'a çıkarıldı.
+> `cargo package` doğrulandı: `config.example.json` pakete giriyor ve paketlenmiş
+> crate tek başına derleniyor (`include_str!` bağımlılığı için kritik).
+> Yayın komutları kullanıcıya verildi (kullanıcı kendisi çalıştırıyor).
+> 📌 SONRAKİ: Linux sürümü (bkz "## 11").
 >
 > Kalan öneriler → "## 9.C". Derleme/dağıtım → "## 10". Devam için ilgili bölüme bak.
 
@@ -170,16 +241,20 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 - [x] Tek SSH bağlantısı, tembel açılan kabuk kanalı modlar arası canlı.
 - [x] Kabuk kapanınca (`exit`) dosya moduna otomatik dönüş.
 
-### Aşama 5 — Cila (modern his) — KALAN İŞ
+### Aşama 5 — Cila (modern his) — TAMAMLANDI (2026-07-31)
 - [x] 256/truecolor (vt100 + tui-term otomatik); başlık çubuğu stilize.
-- [x] Kaydırma tamponu 1000 satır (`SCROLLBACK`).
+- [x] Kaydırma tamponu 1000 satır (`SCROLLBACK`) + tekerlek/Shift+PgUp ile gezinme.
 - [x] Kabuk koparsa nazik dönüş + durum mesajı.
 - [x] README güncellendi.
-- [ ] **Panoya yapıştırma** (`send_bytes` hazır; `arboard` + Ctrl+Shift+V / sağ tık).
-- [ ] **Fareyle metin seçme / kopyalama** (terminal modunda mouse capture
-      etkilediğinden; ya seçim için mouse capture'ı geçici kapat ya da SGR mouse
-      forwarding). Şimdilik yok — README'de belirtildi.
-- [ ] (İsteğe bağlı) büyük çıktıda `try_recv` ile batch besleme (daha az redraw).
+- [x] **Panoya yapıştırma** — `arboard`; sağ tık / Shift+Ins / Ctrl+Shift+V.
+- [x] **Fareyle metin seçme / kopyalama** — mouse capture'ı kapatmaya gerek
+      kalmadı: seçimi kendimiz çiziyoruz (`highlight_selection`) ve metni
+      `vt100::Screen::contents_between` ile alıyoruz.
+- [x] Büyük çıktıda `try_recv` ile batch besleme (daha az redraw).
+
+> Uygulama notu: seçim ve kopyalama `visible_rows()` üzerinden çalıştığı için
+> kaydırma tamponundayken de doğru metni verir (tui-term `screen.cell()` ile
+> aynı görünümü çizer). Blok (dikdörtgen) seçim yok, seçim satır bazlı.
 
 ---
 
@@ -201,13 +276,15 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> Çekirdek özellik tamam ve derleniyor. Sıradaki iş **Aşama 5 kalanları**:
-> 1. **Gerçek sunucuda elle test** (F1 → `vim`/`htop`/renkler, resize, `exit` →
->    dosya moduna dönüş). `cargo run` ile.
-> 2. **Panoya yapıştırma**: `arboard` ekle; terminal modunda Ctrl+Shift+V (ya da
->    sağ tık) → pano metnini `TermSession::send_bytes` ile gönder.
-> 3. **Metin seçme/kopyalama**: mouse capture terminalde seçimi engelliyor;
->    ya seçim sırasında capture'ı geçici kapat ya da SGR mouse forwarding ekle.
+> Aşama 5 bitti; çalışma ağacında **commit'lenmemiş** değişiklikler var
+> (`Cargo.toml`, `Cargo.lock`, `main.rs`, `terminal.rs`, `ui.rs`).
+>
+> 1. ✅ Elle test edildi: seçme/kopyalama, sağ tık yapıştırma, Ctrl+V & arkadaşları.
+> 2. **v0.2.0 yayını** — komutlar "## 12"de; kullanıcı çalıştırıyor.
+> 3. **Linux sürümü** (bkz. "## 11") — `arboard` yeni bağımlılık, orada doğrula.
+>
+> Henüz elle denenmemiş olanlar (fırsat oldukça): `vim`/`htop` tam ekran,
+> tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
 
 ## 8. Bağlam (kod referansları)
 - Kabuk kanalı: `src/ssh.rs` — `Ssh::open_shell(cols, rows)` aynı bağlantıda
@@ -296,8 +373,7 @@ düzelmezse ham log'a bak.
 - ✅ **Büyük çıktı performansı** — döngü başında `try_recv` batch besleme eklendi.
 - ✅ **Fareyle sekme geçişi** — üst çubuktaki F1/F2 sekmeleri tıklanabilir
   (`terminal::hit_tab`, main.rs global mouse yakalama).
-- [ ] **Fareyle metin seçme/kopyalama** (terminalde mouse capture seçimi engelliyor;
-  seçimde capture'ı geçici kapat ya da SGR mouse forwarding). Hâlâ yok.
+- ✅ **Fareyle metin seçme/kopyalama** + panodan yapıştırma + kaydırma (2026-07-31).
 - [ ] **Güvenlik (eski iskelet borçları)**: `known_hosts` doğrulaması
   (`check_server_key` şu an daima `true`) + publickey (anahtar) auth.
 - **Klasör (recursive) transferi** (F2 tarafı — hâlâ sadece tek dosya).
@@ -315,7 +391,7 @@ düzelmezse ham log'a bak.
 - **i686 (32-bit)**: `rustup target add i686-pc-windows-msvc` →
   `cargo build --release --target i686-pc-windows-msvc` →
   `target/i686-pc-windows-msvc/release/tfs.exe` (~3.8 MB). ✅ (ring/russh sorunsuz derlendi.)
-- Release asset adları: `dist/tfs-v0.1.0-windows-{x86_64,i686}.exe`. `dist/` gitignore'lu.
+- Release asset adları: `dist/tfs-v<sürüm>-windows-{x86_64,i686}.exe`. `dist/` gitignore'lu.
 
 ### 10.2 Windows 7/8 — DESTEKLENMİYOR (bilinçli)
 Rust 1.78+ standart `*-pc-windows-msvc` hedefi Win7/8'i bıraktı; binary Win10+ ister.
@@ -342,3 +418,37 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > - Cross-compile yerine gerçek Linux'ta derlemek en temizi (glibc uyumu için
 >   mümkünse eski bir dağıtım ya da `x86_64-unknown-linux-musl` ile statik binary).
 > - CI (GitHub Actions) ile Win+Linux otomatik release ileride düşünülebilir.
+>
+> **DİKKAT — `arboard` (2026-07-31 eklendi)**: Linux'ta pano için `x11rb` (saf Rust,
+> sistem kütüphanesi istemez) + `wayland-data-control` özelliğiyle `wl-clipboard-rs`
+> kullanılıyor. Wayland yolu `wayland-client`'ın **saf Rust** backend'ini seçtiği
+> için `libwayland-dev` gerekmemeli — ama Linux'ta ilk derlemede DOĞRULA.
+> Derleme patlarsa çözüm: `Cargo.toml`'da `features = ["wayland-data-control"]`
+> listesini boşalt (X11/XWayland ile pano yine çalışır). Pano hiç açılamazsa kod
+> zaten nazikçe düşüyor (`clipboard: None` → üst çubukta "⚠ pano yok").
+>
+> **NOT — yapıştırma Linux'ta farklı çalışır**: Linux terminalleri bracketed
+> paste'i destekler, yani crossterm gerçek `Event::Paste` üretir ve yığın toplama
+> (`collect_key_burst`) hiç devreye girmez. Windows'a özgü bir çözümdü; Linux'ta
+> yapıştırmanın zaten tek parça geldiğini doğrula.
+
+---
+
+## 12. v0.2.0 yayın komutları (2026-08-01)
+
+Sürüm `Cargo.toml`'da 0.2.0'a çıkarıldı, `cargo package` doğrulandı. Release
+notları: `dist/RELEASE-v0.2.0.md` (dist gitignore'lu). Komutlar kullanıcıda.
+
+```powershell
+# Çalışan tfs.exe varsa kapat (target kilitlenmesin)
+cargo clippy --all-targets; cargo test; cargo build --release
+git add -A; git commit; git tag v0.2.0
+git push origin main; git push origin v0.2.0
+cargo build --release --target i686-pc-windows-msvc
+gh release create v0.2.0 <exe'ler> --notes-file dist\RELEASE-v0.2.0.md
+cargo publish --dry-run; cargo publish
+```
+
+> `cargo publish` geri alınamaz (yalnızca `yank`). Önce `--dry-run`.
+
+Sonraki sürümlerde: `Cargo.toml`'da `version` artır → aynı adımlar.

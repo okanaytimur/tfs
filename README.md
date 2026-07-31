@@ -36,6 +36,28 @@ ancak Tier-3 `*-win7-windows-msvc` hedefi + nightly + `-Z build-std` ile derlene
 
 ## Yapılandırma
 
+**İlk çalıştırmada bir şey hazırlamanıza gerek yok**: `config.json` yoksa `tfs`
+hata vermez, örnek bir tane oluşturur ve dosyanın tam yolunu gösterip çıkar.
+Dosyayı açıp kendi sunucularınızı yazın, `tfs`'i tekrar çalıştırın.
+
+```
+$ tfs
+
+tfs — ilk çalıştırma
+
+Yapılandırma dosyası bulunamadı, sizin için örnek bir tane oluşturuldu:
+
+    D:\isler\config.json
+
+Dosyayı açıp kendi sunucularınızı yazın (name / host / port / user /
+password), sonra tfs'i yeniden çalıştırın:
+
+    notepad "D:\isler\config.json"
+```
+
+Dosya bulunduğunuz dizine oluşturulur; başka bir yol vermek için argüman
+kullanın (`tfs sunucular.json` — gerekiyorsa alt dizinler de açılır).
+
 Sunucular `config.json` dosyasından okunur — birden fazla sunucu, parolalarıyla:
 
 ```json
@@ -48,7 +70,9 @@ Sunucular `config.json` dosyasından okunur — birden fazla sunucu, parolaları
 ```
 
 - `port` opsiyonel (varsayılan 22).
-- Şablon için `config.example.json` → `config.json` olarak kopyalayıp düzenleyin.
+- Şablonu elle de kopyalayabilirsiniz: `config.example.json` → `config.json`.
+  (Dosya hiç düzenlenmemişse — yani birebir şablonsa — `tfs` bağlanmayı denemez,
+  yine dosyayı düzenlemeniz gerektiğini söyler.)
 - **Güvenlik**: parolalar düz metin tutulur; `config.json`'ı repoya koymayın
   (`.gitignore`'a ekli). Anahtar (publickey) auth sonraki adımlarda.
 
@@ -75,9 +99,43 @@ Bağlandıktan sonra aynı SSH bağlantısı üzerinde iki mod arasında geçiş
 iletilmezler (diğer tüm tuşlar kabuğa gider). Terminalden çıkmak için kabukta
 `exit` yaz (dosya moduna döner) ya da `F2` → `q`.
 
-**Yapıştırma**: Terminal modunda panodan yapıştırma desteklenir (terminalinizin
-yapıştırma kısayolu — genelde `Ctrl+Shift+V`, `Shift+Insert` ya da sağ tık —
-bracketed paste ile kabuğa iletilir).
+### Terminal modunda kopyala / yapıştır / kaydır
+
+| İşlem | Nasıl |
+|-------|-------|
+| **Kopyala** | Fareyle metnin üzerinden sürükle; tuşu bırakınca seçim panoya kopyalanır (üst çubukta `✓ N karakter kopyalandı`). |
+| **Yapıştır** | **Sağ tık**, **Ctrl+V**, **Shift+Insert**, **Ctrl+Shift+V** ya da terminalinizin kendi Yapıştır menüsü — hepsi metni **tek seferde** gönderir. |
+| **Geçmişe kaydır** | **Fare tekerleği** ya da **Shift+PgUp / Shift+PgDn**. Tampon 1000 satır; bir tuşa basınca canlı ekrana döner. |
+
+Kaydırma sırasında üst çubukta kaç satır geride olduğunuz gösterilir ve imleç
+gizlenir. Yapıştırılan metnin satır sonları `\r`'a çevrilir; uzak taraf bracketed
+paste modundaysa (`vim`, `bash`) metin `ESC[200~`/`ESC[201~` ile sarılır — böylece
+çok satırlı yapıştırma yanlışlıkla komut olarak çalışmaz ve `vim`'de otomatik
+girinti metni bozmaz.
+
+<details><summary>Windows'ta yapıştırma neden özel ele alınıyor?</summary>
+
+crossterm'in `Event::Paste` olayı **Windows'ta hiç üretilmez** — eski konsol
+API'sinde bracketed paste yok. Windows Terminal / conhost, `Ctrl+V` gibi
+kısayolları kendisi yakalayıp panodaki metni uygulamaya **tek tek tuş olayı**
+olarak enjekte eder. Bu yüzden yapıştırma harf harf gidiyordu: her karakter ayrı
+bir SSH paketi (yavaş) ve `vim` bunu yazım sanıp otomatik girinti uyguluyordu.
+
+Çözüm: bir tuş **hemen gönderilir** (yazmaya gecikme eklenmez), ardından
+"arkasından devamı geliyor mu?" diye kısa bir süre (25 ms) dinlenir. Geliyorsa
+bu bir yapıştırmadır; kalan karakterler toplanıp tek parça gönderilir. İnsan
+yazımında tuşlar arası boşluk ≥60 ms, tuş tekrarında bile ≥32 ms olduğundan
+sıradan yazma yığına dönüşmez. Ayrıca yalnızca **çok satırlı** yığın bracketed
+paste ile sarılır — tek satırlıkta sarmanın bir faydası yok ve `vim` normal
+modunda tuş tekrarı yanlışlıkla yığın sanılırsa zarar verebilirdi.
+
+Sağ tık bu yolu hiç kullanmaz: panoyu doğrudan okur.
+
+> Teşhis: `TFS_KEYLOG=tuslar.txt` ile çalıştırırsanız her girdi olayı, bir
+> öncekinden kaç mikrosaniye sonra geldiğiyle birlikte kaydedilir — yapıştırmanın
+> nasıl teslim edildiğini ölçmek için.
+
+</details>
 
 **Terminal sorgu yanıtları**: Emülatör, kabuğun/promptun gönderdiği imleç-konumu
 (CPR, `ESC[6n`) ve cihaz-kimliği (DA) sorgularına yanıt verir; aksi halde bazı
@@ -111,8 +169,9 @@ promptlar ~1 sn bekleyip ekranı sıfırlıyordu.
   Prod'da `known_hosts` kontrolü ekle.
 - Sadece parola kimlik doğrulaması; anahtar (publickey) auth eklenebilir.
 - OS dosya yöneticisi ↔ terminal DnD **mümkün değil** (terminal sınırı).
-- SSH terminali (F1): fare uzak programlara iletilmez; pano yapıştırma ve fareyle
-  metin seçme henüz yok (sonraki adım). Kaydırma tamponu 1000 satır.
+- SSH terminali (F1): fare uzak programlara **iletilmez** (SGR mouse forwarding
+  yok) — `htop`/`vim` içinde fare çalışmaz, fare seçme/kopyalama içindir.
+  Seçim satır bazlıdır (blok/dikdörtgen seçim yok).
 
 ## Kripto backend notu
 

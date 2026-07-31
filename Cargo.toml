@@ -1,6 +1,6 @@
 [package]
 name = "tfs-ssh"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "tfs — fare öncelikli SSH dosya tarayıcısı (F2) + modern SSH terminali (F1). Tek bağlantı, iki mod."
 authors = ["Okan Aytimur"]
@@ -30,3 +30,12 @@ serde_json = "1"
 # 0.1) ise yan yana derleniyor — bu yüzden sabitlendi.
 tui-term = "=0.2.0"
 vt100 = "=0.15.2"
+# Panoya kopyalama (çapraz-platform). image-data özelliği ağır `image` crate'ini
+# çektiği için kapalı; sadece metin panosu gerekiyor. wayland-data-control Linux
+# Wayland desteği içindir (Windows'ta unix-gated olduğu için etkisiz).
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+
+[dev-dependencies]
+# `test-util` (sanal zaman / start_paused) `full` içinde yok; yapıştırma yığını
+# testleri zamanlayıcıyı gerçek zamanda beklemeden ilerletmek için kullanıyor.
+tokio = { version = "1", features = ["test-util"] }

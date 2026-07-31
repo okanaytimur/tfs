@@ -21,7 +21,7 @@ pub fn draw(f: &mut Frame, app: &mut App, server_name: &str) {
         .split(f.area());
 
     // Üst mod çubuğu (F1/F2) — terminal moduyla ortak.
-    crate::terminal::draw_top_bar(f, root[0], server_name, false, false);
+    crate::terminal::draw_top_bar(f, root[0], server_name, false, false, None);
 
     let cols = Layout::default()
         .direction(Direction::Horizontal)

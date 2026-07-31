@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, KeyCode, KeyEventKind, MouseButton, MouseEventKind,
+        Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -29,9 +29,13 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
 
 use crate::app::{App, PanelId, TransferRequest, TransferState};
-use crate::config::Config;
+use crate::config::{Config, Loaded};
 use crate::ssh::Ssh;
 use crate::terminal::TermSession;
+
+/// Olay akışı. `Peekable`, yapıştırma yığınını toplarken sıradaki olayı
+/// tüketmeden yoklayabilmek için gerekli (bkz. `drain_key_burst`).
+type Events = futures::stream::Peekable<EventStream>;
 
 /// Aktif ekran (mod). F1 → Terminal, F2 → Dosya transferi.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,13 +47,52 @@ enum Screen {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config_path = std::env::args().nth(1).unwrap_or_else(|| "config.json".into());
-    let cfg = Config::load(&config_path)?;
+    let cfg = match Config::load_or_create(&config_path)? {
+        Loaded::Ready(c) => c,
+        // Yapılandırma yok ya da hiç doldurulmamış: şablonu gösterip nazikçe çık
+        // (TUI hiç açılmadığı için düz yazdırmak güvenli).
+        Loaded::NeedsEditing { path, created } => {
+            print_config_hint(&path, created);
+            return Ok(());
+        }
+    };
 
     let mut terminal = setup_terminal()?;
     // TUI içindeki tüm akışı sar; hata olsa da terminali geri yükle.
     let res = app_flow(&mut terminal, &cfg).await;
     restore_terminal(&mut terminal)?;
     res
+}
+
+/// Yapılandırma doldurulmadığında gösterilen yönlendirme. TUI açılmadan önce
+/// (ya da hiç açılmadan) çağrılır, bu yüzden düz `println!` kullanılır.
+fn print_config_hint(path: &std::path::Path, created: bool) {
+    let p = path.display();
+    println!();
+    if created {
+        println!("tfs — ilk çalıştırma");
+        println!();
+        println!("Yapılandırma dosyası bulunamadı, sizin için örnek bir tane oluşturuldu:");
+    } else {
+        println!("tfs — yapılandırma henüz düzenlenmemiş");
+        println!();
+        println!("Bu dosya hâlâ örnek şablonun aynısı:");
+    }
+    println!();
+    println!("    {p}");
+    println!();
+    println!("Dosyayı açıp kendi sunucularınızı yazın (name / host / port / user /");
+    println!("password), sonra tfs'i yeniden çalıştırın:");
+    println!();
+    if cfg!(windows) {
+        println!("    notepad \"{p}\"");
+    } else {
+        println!("    ${{EDITOR:-nano}} \"{p}\"");
+    }
+    println!();
+    println!("Farklı bir dosya kullanmak için yolunu argüman verin:  tfs sunucular.json");
+    println!("Not: parolalar düz metin saklanır — dosyayı paylaşmayın, repoya koymayın.");
+    println!();
 }
 
 /// Sunucu seç → bağlan → dosya tarayıcısını çalıştır.
@@ -81,7 +124,7 @@ async fn run(
     ssh: Arc<Ssh>,
     server_name: String,
 ) -> Result<()> {
-    let mut events = EventStream::new();
+    let mut events = EventStream::new().peekable();
     let mut screen = Screen::FileTransfer;
 
     // Kabuk oturumu ilk F1'de tembel açılır, sonra uygulama boyunca canlı tutulur.
@@ -93,6 +136,12 @@ async fn run(
     // bayrakla işaretlenip döngü başında (select dışında) uygulanır.
     let mut pending_open = false;
     let mut shell_closed = false;
+    // Yazılabilir bir tuş geldi; devamı (yapıştırma yığını olabilir) döngü
+    // başında toplanacak. `events` select! içinde ödünç alındığı için yığın
+    // taraması orada yapılamaz — aynı gerekçe, aynı desen.
+    let mut pending_burst: Option<crossterm::event::KeyEvent> = None;
+    // Teşhis (yalnızca TFS_KEYLOG ayarlıysa): girdi olaylarının zamanlaması.
+    let mut keylog = KeyLog::new();
 
     loop {
         // --- Bekleyen kabuk durum geçişleri (select dışında) ---
@@ -116,6 +165,22 @@ async fn run(
             term_rx = None;
             screen = Screen::FileTransfer;
             app.status = "Kabuk oturumu kapandı.".into();
+        }
+
+        // Yazılabilir tuş: önce hemen gönder (yazmaya gecikme eklenmesin),
+        // sonra arkasından yığın gelip gelmediğine bak. Yığın varsa bu,
+        // emülatörün tuş tuş enjekte ettiği bir yapıştırmadır → tek parça.
+        if let Some(k) = pending_burst.take() {
+            if let Some(t) = term.as_mut() {
+                t.send_key(k).await;
+                let rest = collect_key_burst(&mut events).await;
+                if let Some(l) = keylog.as_mut() {
+                    l.write(&format!("BURST {} karakter toplandı", rest.chars().count()));
+                }
+                if !rest.is_empty() {
+                    t.send_burst(rest).await;
+                }
+            }
         }
 
         // Kabuktan biriken ek parçaları çiz-öncesi topluca işle (daha az redraw)
@@ -161,6 +226,9 @@ async fn run(
             maybe_ev = events.next() => {
                 match maybe_ev {
                     Some(Ok(ev)) => {
+                        if let Some(l) = keylog.as_mut() {
+                            l.write(&format!("{ev:?}"));
+                        }
                         // Global mod tuşları (F1/F2) — her iki modda yakalanır, kabuğa iletilmez.
                         if let Event::Key(k) = &ev {
                             if k.kind == KeyEventKind::Press {
@@ -209,13 +277,69 @@ async fn run(
                             Screen::Terminal => {
                                 if let Some(t) = term.as_mut() {
                                     match ev {
+                                        // Shift+Ins / Ctrl+Shift+V → panodan yapıştır
+                                        // (kabuğa iletilmez).
+                                        Event::Key(k)
+                                            if k.kind == KeyEventKind::Press && is_paste_key(&k) =>
+                                        {
+                                            t.paste_from_clipboard().await;
+                                        }
+                                        // Shift+PgUp / Shift+PgDn → kaydırma tamponunda gez.
+                                        Event::Key(k)
+                                            if k.kind == KeyEventKind::Press
+                                                && k.modifiers.contains(KeyModifiers::SHIFT)
+                                                && matches!(
+                                                    k.code,
+                                                    KeyCode::PageUp | KeyCode::PageDown
+                                                ) =>
+                                        {
+                                            let page = term_area(terminal)?.0 as usize;
+                                            if k.code == KeyCode::PageUp {
+                                                t.scroll_up(page);
+                                            } else {
+                                                t.scroll_down(page);
+                                            }
+                                        }
+                                        // Yazılabilir tuş: devamında yığın olup
+                                        // olmadığına döngü başında bakılır.
+                                        Event::Key(k)
+                                            if k.kind == KeyEventKind::Press
+                                                && burst_char(&k).is_some() =>
+                                        {
+                                            pending_burst = Some(k);
+                                            continue;
+                                        }
                                         Event::Key(k) if k.kind == KeyEventKind::Press => {
                                             t.send_key(k).await;
                                         }
                                         // Yapıştırma (bracketed paste) → metni kabuğa yaz.
                                         Event::Paste(text) => {
-                                            t.send_bytes(text.into_bytes()).await;
+                                            t.send_paste(text).await;
                                         }
+                                        // Fareyle metin seçme (grid satırı = ekran satırı - 1,
+                                        // üst çubuk için). Bırakınca panoya kopyalanır.
+                                        // Sağ tık → panodan yapıştır (PuTTY alışkanlığı).
+                                        Event::Mouse(m) => match m.kind {
+                                            MouseEventKind::Down(MouseButton::Left) if m.row >= 1 => {
+                                                t.sel_start(m.row - 1, m.column);
+                                            }
+                                            MouseEventKind::Drag(MouseButton::Left) if m.row >= 1 => {
+                                                t.sel_update(m.row - 1, m.column);
+                                            }
+                                            MouseEventKind::Up(MouseButton::Left) => {
+                                                t.sel_finish_copy();
+                                            }
+                                            MouseEventKind::Down(MouseButton::Right) => {
+                                                t.paste_from_clipboard().await;
+                                            }
+                                            MouseEventKind::ScrollUp => {
+                                                t.scroll_up(terminal::SCROLL_STEP);
+                                            }
+                                            MouseEventKind::ScrollDown => {
+                                                t.scroll_down(terminal::SCROLL_STEP);
+                                            }
+                                            _ => {}
+                                        },
                                         // Resize çizim aşamasında ele alınır.
                                         _ => {}
                                     }
@@ -249,6 +373,145 @@ async fn run(
     }
 }
 
+/// Terminal modunda panodan yapıştırma kısayolu mu? (Ctrl+V kabuğa gitmeli —
+/// uzak programlarda Ctrl+V'nin kendi anlamı var — bu yüzden Shift şart.)
+///
+/// Not: Windows Terminal / conhost bu kısayolları çoğu zaman **kendisi** yakalar
+/// ve panoyu tuş tuş enjekte eder; o durumda burası hiç çalışmaz, yığın toplama
+/// (`drain_key_burst`) devreye girer.
+fn is_paste_key(k: &crossterm::event::KeyEvent) -> bool {
+    let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    match k.code {
+        KeyCode::Insert => shift && !ctrl,
+        KeyCode::Char('V') | KeyCode::Char('v') => ctrl && shift,
+        _ => false,
+    }
+}
+
+/// Yığın hâlinde gelebilecek "yazılabilir" tuşun ürettiği karakter.
+/// Ctrl/Alt'lı tuşlar, ok tuşları vb. yığına dahil edilmez (yığını bitirirler).
+fn burst_char(k: &crossterm::event::KeyEvent) -> Option<char> {
+    if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+        return None;
+    }
+    match k.code {
+        KeyCode::Char(c) => Some(c),
+        KeyCode::Enter => Some('\r'),
+        KeyCode::Tab => Some('\t'),
+        _ => None,
+    }
+}
+
+/// Yığındaki tuşlar arası kabul edilen en büyük boşluk. Emülatörün enjekte
+/// ettiği yapıştırma bazen tek seferde konsol tamponuna yazılır, bazen damla
+/// damla gelir; bu eşik ikisini de toparlar. İnsan yazımında tuşlar arası
+/// boşluk ≥60 ms, tuş tekrarında bile ≥32 ms (Windows'ta azami ~31/sn)
+/// olduğundan sıradan yazma yığına dönüşmez.
+const BURST_GAP: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// Tek seferde toplanacak en fazla bayt. Devasa bir yapıştırmada ekranın
+/// donmuş görünmemesi için üst sınır; kalanı sonraki turda toplanır.
+const BURST_MAX_BYTES: usize = 64 * 1024;
+
+/// `TFS_KEYLOG=yol` ayarlıysa gelen her girdi olayını, bir öncekinden kaç ms
+/// sonra geldiğiyle birlikte kaydeder. Yapıştırmanın nasıl teslim edildiğini
+/// (tek seferde tamponlanmış mı, damla damla mı — ve hangi aralıkla) ölçmek
+/// için: yığın eşiği `BURST_GAP` buna göre ayarlanır.
+struct KeyLog {
+    file: std::fs::File,
+    last: std::time::Instant,
+}
+
+impl KeyLog {
+    fn new() -> Option<Self> {
+        let path = std::env::var("TFS_KEYLOG").ok()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()?;
+        Some(Self {
+            file,
+            last: std::time::Instant::now(),
+        })
+    }
+
+    fn write(&mut self, what: &str) {
+        use std::io::Write;
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(self.last).as_micros();
+        self.last = now;
+        let _ = writeln!(self.file, "+{:>8} us  {what}", dt);
+    }
+}
+
+/// Yazılabilir bir tuş **gönderildikten sonra** arkasından yığın gelip
+/// gelmediğine bakar; gelen yazılabilir tuşları toplayıp döndürür.
+///
+/// Neden gerekli: Windows'ta emülatörün kendi yapıştırma kısayolu (Ctrl+V,
+/// Shift+Ins, Yapıştır menüsü…) panodaki metni **tek tek tuş olayı** olarak
+/// enjekte eder — crossterm'in `Event::Paste`'i Windows'ta hiç üretilmez,
+/// çünkü eski konsol API'sinde bracketed paste yok. Toplamazsak yapıştırma
+/// harf harf gider: her karakter ayrı bir SSH paketi (çok yavaş) ve `vim`
+/// bunu yazım sanıp otomatik girinti uygular.
+///
+/// İlk karakter çağıran tarafından zaten gönderildiği için sıradan yazmaya
+/// **hiç gecikme eklenmez**; buradaki bekleme yalnızca "arkasından bir şey
+/// geliyor mu" dinlemesidir ve karakter zaten yoldayken ekrana da bir şey
+/// düşmez.
+///
+/// (Akış üzerinden geneldir; böylece zamanlamaya duyarlı bu mantık gerçek
+/// terminal olmadan test edilebiliyor.)
+async fn collect_key_burst<S>(events: &mut futures::stream::Peekable<S>) -> String
+where
+    S: futures::Stream<Item = io::Result<Event>> + Unpin,
+{
+    use std::pin::Pin;
+
+    /// Sıradaki olayla ne yapılacağı (peek borrow'unu bitirmek için ayrı adım).
+    enum Step {
+        Take(char),
+        /// Tuş bırakma olayı: yığını bölmemeli, sessizce yutulur.
+        Skip,
+        Stop,
+    }
+
+    let mut text = String::new();
+    while text.len() < BURST_MAX_BYTES {
+        // NOT: burada `now_or_never()` **kullanılmamalı**. crossterm'in
+        // `EventStream`'i Pending dönerken kendisini uyandıracak waker'ı
+        // saklar; noop waker verilirse `stream_wake_task_executed` bayrağı
+        // takılı kalır ve gerçek waker bir daha kaydedilemez — ana döngü
+        // tuşlara sağır kalabilir. `timeout` her zaman gerçek waker'la yoklar.
+        // Olay hazırsa zaten beklemeden döner.
+        let peeked = match tokio::time::timeout(BURST_GAP, Pin::new(&mut *events).peek()).await {
+            Ok(p) => p,
+            // Sessizlik: yığın bitti (ya da hiç yoktu).
+            Err(_) => break,
+        };
+        let step = match peeked {
+            Some(Ok(Event::Key(k))) if k.kind == KeyEventKind::Press => match burst_char(k) {
+                Some(c) => Step::Take(c),
+                None => Step::Stop,
+            },
+            Some(Ok(Event::Key(_))) => Step::Skip,
+            _ => Step::Stop,
+        };
+        match step {
+            Step::Take(c) => {
+                text.push(c);
+                let _ = events.next().await;
+            }
+            Step::Skip => {
+                let _ = events.next().await;
+            }
+            Step::Stop => break,
+        }
+    }
+    text
+}
+
 /// Terminal çizim alanının (üst çubuk için -1 satır) satır/sütun boyutu.
 fn term_area(terminal: &Terminal<CrosstermBackend<Stdout>>) -> Result<(u16, u16)> {
     let size = terminal.size()?;
@@ -265,7 +528,7 @@ async fn run_transfer(
     app: &mut App,
     ssh: &Arc<Ssh>,
     req: TransferRequest,
-    events: &mut EventStream,
+    events: &mut Events,
     server_name: &str,
 ) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -376,4 +639,119 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
     )?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+/// Yapıştırma yığını toplama testleri. Bu mantık **her tuş vuruşunun** yolunda
+/// olduğu için (yanlışlıkla yazımı yığın sanırsa yazmak bozulur) zamanlamaya
+/// duyarlı kısmı burada gerçek terminal olmadan doğrulanıyor.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+    use futures::stream::{self, StreamExt};
+
+    fn press(code: KeyCode) -> io::Result<Event> {
+        Ok(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
+    }
+
+    fn ch(c: char) -> io::Result<Event> {
+        press(KeyCode::Char(c))
+    }
+
+    /// Akış biter (peek → None) — zamanlayıcıya hiç girilmez.
+    fn closing(evs: Vec<io::Result<Event>>) -> futures::stream::Peekable<stream::Iter<std::vec::IntoIter<io::Result<Event>>>> {
+        stream::iter(evs).peekable()
+    }
+
+    /// Tuşun ardından hiçbir şey gelmezse yığın yok — sıradan yazım.
+    #[tokio::test]
+    async fn arkasi_bos_ise_yigin_yok() {
+        let mut s = closing(vec![]);
+        assert_eq!(collect_key_burst(&mut s).await, "");
+    }
+
+    #[tokio::test]
+    async fn ardisik_karakterler_tek_parca_olur() {
+        let mut s = closing(vec![ch('e'), ch('l'), ch('l'), ch('o')]);
+        assert_eq!(collect_key_burst(&mut s).await, "ello");
+    }
+
+    /// Çok satırlı yapıştırma: Enter `\r`'a çevrilir ve yığını bölmez.
+    #[tokio::test]
+    async fn enter_ve_tab_yigina_dahil() {
+        let mut s = closing(vec![ch('a'), press(KeyCode::Enter), press(KeyCode::Tab), ch('b')]);
+        assert_eq!(collect_key_burst(&mut s).await, "a\r\tb");
+    }
+
+    /// Ok tuşu gibi yazılabilir olmayan bir tuş yığını bitirir ve **tüketilmez**
+    /// (ana döngü onu normal tuş olarak işlemeye devam edebilmeli).
+    #[tokio::test]
+    async fn yazilabilir_olmayan_tus_yigini_bitirir_ve_akista_kalir() {
+        let mut s = closing(vec![ch('a'), press(KeyCode::Left), ch('b')]);
+        assert_eq!(collect_key_burst(&mut s).await, "a");
+        let next = s.next().await.unwrap().unwrap();
+        assert_eq!(next, Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+    }
+
+    /// Ctrl'lü tuş (yapıştırılan metinde olamaz) yığını bitirir.
+    #[tokio::test]
+    async fn ctrl_tusu_yigini_bitirir() {
+        let ctrl_c = Ok(Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        let mut s = closing(vec![ch('a'), ctrl_c]);
+        assert_eq!(collect_key_burst(&mut s).await, "a");
+    }
+
+    /// Windows'ta tuş bırakma olayları araya girebilir; yığını bölmemeli.
+    #[tokio::test]
+    async fn tus_birakma_olaylari_yutulur() {
+        let release = Ok(Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        )));
+        let mut s = closing(vec![ch('a'), release, ch('b')]);
+        assert_eq!(collect_key_burst(&mut s).await, "ab");
+    }
+
+    /// Fare/resize gibi tuş olmayan olay yığını bitirir (akışta kalır).
+    #[tokio::test]
+    async fn tus_disi_olay_yigini_bitirir() {
+        let mut s = closing(vec![ch('a'), Ok(Event::Resize(80, 24))]);
+        assert_eq!(collect_key_burst(&mut s).await, "a");
+    }
+
+    /// Akış açık ama boş kalırsa sonsuza kadar beklememeli.
+    /// `start_paused` sanal zamanı ilerletir.
+    #[tokio::test(start_paused = true)]
+    async fn acik_ama_bos_akista_takilmaz() {
+        let mut s = stream::iter(vec![ch('a')]).chain(stream::pending()).peekable();
+        assert_eq!(collect_key_burst(&mut s).await, "a");
+    }
+
+    /// Sıradan yazım (tuşlar arası uzun boşluk) yığın sayılmamalı.
+    #[tokio::test(start_paused = true)]
+    async fn yavas_yazim_yigin_sayilmaz() {
+        // `Box::pin`: `once(async …)` Unpin değil.
+        let slow = Box::pin(stream::once(async {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            ch('b')
+        }));
+        let mut s = slow.peekable();
+        assert_eq!(collect_key_burst(&mut s).await, "");
+    }
+
+    /// Damla damla gelen (emülatörün yavaş enjekte ettiği) yapıştırma da
+    /// toparlanmalı: 10 ms aralıklı karakterler tek yığın olur.
+    #[tokio::test(start_paused = true)]
+    async fn damla_damla_gelen_yapistirma_toparlanir() {
+        let trickle = Box::pin(stream::unfold(0usize, |i| async move {
+            if i >= 4 {
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            Some((ch("abcd".as_bytes()[i] as char), i + 1))
+        }));
+        let mut s = trickle.peekable();
+        assert_eq!(collect_key_burst(&mut s).await, "abcd");
+    }
 }
