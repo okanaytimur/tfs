@@ -38,9 +38,11 @@ pub fn draw(f: &mut Frame, app: &mut App, server_name: &str) {
     )]));
     f.render_widget(status, root[2]);
 
-    // Devam eden transfer varsa ortada bir progress bar göster.
+    // Devam eden transfer varsa ortada bir progress bar göster. Klasör
+    // transferinde ikinci satır o an hangi dosyada olduğumuzu söyler — yoksa
+    // büyük bir ağaçta çubuk dakikalarca sessiz kalır.
     if let Some(t) = &app.transfer {
-        let area = centered_rect(f.area(), 60, 3);
+        let area = centered_rect(f.area(), 70, 4);
         let ratio = if t.total > 0 {
             (t.done as f64 / t.total as f64).clamp(0.0, 1.0)
         } else {
@@ -57,18 +59,43 @@ pub fn draw(f: &mut Frame, app: &mut App, server_name: &str) {
         } else {
             format!("{}  {}", t.name, human_bytes(t.done))
         };
-        let gauge = Gauge::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-                    .title(" Transfer — q/Esc: iptal "),
-            )
-            .gauge_style(Style::default().fg(Color::Green).bg(Color::Black))
-            .ratio(ratio)
-            .label(label);
+
+        let title = match t.files {
+            Some((done, total)) if total > 1 => {
+                format!(" Transfer — {done}/{total} dosya — q/Esc: iptal ")
+            }
+            _ => " Transfer — q/Esc: iptal ".to_string(),
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            .title(title);
+        let inner = block.inner(area);
         f.render_widget(Clear, area);
-        f.render_widget(gauge, area);
+        f.render_widget(block, area);
+
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(inner);
+
+        f.render_widget(
+            Gauge::default()
+                .gauge_style(Style::default().fg(Color::Green).bg(Color::Black))
+                .ratio(ratio)
+                .label(label),
+            rows[0],
+        );
+
+        if let Some(what) = &t.label {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    truncate_left(what, rows[1].width as usize),
+                    Style::default().fg(Color::Gray),
+                ))),
+                rows[1],
+            );
+        }
     }
 
     // Sürükleme hayaleti (fare pozisyonunda yüzen etiket)
@@ -158,6 +185,20 @@ fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
         width,
         height: height.min(area.height),
     }
+}
+
+/// Uzun yolları **baştan** kısaltır: sondaki dosya adı yoldan daha bilgilendirici.
+fn truncate_left(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    if n <= max {
+        return s.to_string();
+    }
+    if max <= 1 {
+        return "…".into();
+    }
+    let keep = max - 1;
+    let tail: String = s.chars().skip(n - keep).collect();
+    format!("…{tail}")
 }
 
 /// Baytları insan-okur biçime çevirir (B, KiB, MiB, GiB).

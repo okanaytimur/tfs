@@ -324,6 +324,23 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 - [x] 🐞 `temp_file_for` aynı milisaniyede çakışıyordu (pid+ms yetmiyor) →
       dizin artık münhasıran açılıyor (`create_dir` + sayaç), test eklendi.
 
+### Aşama 8 — klasör (recursive) transferi (2026-08-30)
+- [x] `ssh.rs`: `walk_local` / `Ssh::walk_remote` (genişlik-öncelikli; **dizin
+      daima içeriğinden önce** listeye girer — hedefte dizinler içerik gelmeden
+      açılsın diye. Test: `dizinler_iceriklerinden_once_gelir`).
+- [x] `Ssh::upload`/`download` artık ağaç aktarıyor (tek dosya = tek kalemlik
+      ağaç, davranış aynı), `TreeOutcome` döndürüyor.
+- [x] Sembolik bağlar **izlenmiyor** (dizin bağı = sonsuz döngü), sayılıp
+      bildiriliyor. Listelenemeyen dizinler de atlanıp sayılıyor.
+- [x] Tek dosya hatası transferi durdurmuyor; `TreeOutcome.first_error` durum
+      çubuğuna düşüyor.
+- [x] İlerleme: önce tarama (gerçek toplam), sonra dosya sayacı + o anki dosya
+      yolu (`TransferProgress.label` / `.files`). `Reporter` çubuğu **monoton**
+      tutuyor (dosya bitiminde beklenen boyuta sabitleniyor).
+- [x] `ui.rs`: ilerleme kutusu 4 satır — başlıkta dosya sayacı, altta o anki yol.
+- [x] 7 yeni test (toplam 23), clippy temiz.
+- [ ] Elle doğrula: iç içe klasör her iki yönde; iptal; izinsiz dizin.
+
 ### Aşama 7 — klavyeyle transfer (2026-08-30)
 - [x] **`t` / F5** → odaklı paneldeki seçili dosyayı karşı panele aktar.
       `App::request_transfer_selected`; sürükle-bırakla ortak `queue_transfer`
@@ -453,7 +470,7 @@ düzelmezse ham log'a bak.
 - ✅ **Fareyle metin seçme/kopyalama** + panodan yapıştırma + kaydırma (2026-07-31).
 - [ ] **Güvenlik (eski iskelet borçları)**: `known_hosts` doğrulaması
   (`check_server_key` şu an daima `true`) + publickey (anahtar) auth.
-- **Klasör (recursive) transferi** (F2 tarafı — hâlâ sadece tek dosya).
+- ✅ **Klasör (recursive) transferi** — Aşama 8'de eklendi (2026-08-30).
 - **Bağlantı kopunca** nazik yeniden bağlanma / picker'a dönüş.
 
 ### 9.D (arşiv) İlk gün başlangıç notu — artık geçildi

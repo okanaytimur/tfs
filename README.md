@@ -1,8 +1,8 @@
 # tfs (terminal-file-send) — SSH dosya tarayıcısı + modern SSH terminali
 
 ratatui + russh + russh-sftp ile:
-- **F2** — iki panelli (YEREL ↔ UZAK) SFTP dosya transferi: `t` ile ya da
-  fareyle sürükle-bırak,
+- **F2** — iki panelli (YEREL ↔ UZAK) SFTP dosya **ve klasör** transferi:
+  `t` ile ya da fareyle sürükle-bırak,
 - **F1** — PuTTY / Windows Terminal benzeri, tam ekran interaktif SSH terminali,
 - **F4** — seçili dosyayı [`fresh`](https://github.com/sinelaw/fresh) editöründe aç
   (uzak dosya: indir → düzenle → otomatik geri yükle),
@@ -210,11 +210,11 @@ cargo install --locked fresh-editor   # kaynaktan
 
 ## Kullanım
 
-- **`t`** (ya da **F5**): Odaklı paneldeki seçili dosyayı **karşı panele** aktarır
-  — karşı panelin o anki dizinine, aynı adla. (YEREL odaklıysa upload, UZAK
-  odaklıysa download.) Fare kullanmadan transfer.
-- **Sürükle-bırak**: Bir dosyayı bir panelden diğerine fareyle sürükleyip bırak
-  → yükleme/indirme başlar. (YEREL→UZAK = upload, UZAK→YEREL = download.)
+- **`t`** (ya da **F5**): Odaklı paneldeki seçili **dosya ya da klasörü** karşı
+  panele aktarır — karşı panelin o anki dizinine, aynı adla. (YEREL odaklıysa
+  upload, UZAK odaklıysa download.) Fare kullanmadan transfer.
+- **Sürükle-bırak**: Bir dosyayı/klasörü bir panelden diğerine fareyle sürükleyip
+  bırak → yükleme/indirme başlar. (YEREL→UZAK = upload, UZAK→YEREL = download.)
 - **Tek tık**: dosya seçer; klasöre tıklamak içine girer.
 - **Tekerlek**: seçimi kaydırır.
 - **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin, `↑/↓` gezin,
@@ -228,12 +228,35 @@ cargo install --locked fresh-editor   # kaynaktan
 - Açılışta `config.json`'daki sunucular listelenir.
 - **Tek tık** ilgili sunucuya bağlanır; `↑/↓` + `Enter` de çalışır; `q` çıkar.
 
+## Klasör transferi
+
+Bir klasörü seçip `t`'ye basmak (ya da sürükleyip bırakmak) **ağacın tamamını**
+aktarır. Önce ağaç taranır — böylece ilerleme çubuğu gerçek bir toplam gösterir
+ve kaçıncı dosyada olduğunuz yazar:
+
+```
+┌ Transfer — 37/412 dosya — q/Esc: iptal ─────────────────┐
+│ ████████████░░░░░░░░  proje  18.4 MiB / 61.2 MiB  (30%) │
+│ …/src/components/header/index.tsx                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+Davranış:
+
+- **Sembolik bağlar izlenmez.** Bir dizin bağı taramayı sonsuz döngüye sokabilir
+  ve bağı hedefiyle sessizce değiştirmek sürpriz olurdu. Atlanır ve sonunda
+  "N sembolik bağ atlandı" diye bildirilir.
+- **Tek bir dosyanın hatası transferi durdurmaz** — sayılır, ilk hatanın metni
+  durum çubuğunda gösterilir ("… 412 dosya · 3 hata · ilk hata: …").
+  Listelenemeyen dizinler (izin yok) de aynı şekilde atlanıp bildirilir.
+- Hedefte var olan dosyaların **üzerine yazılır**, dizinler yoksa açılır.
+- `q`/`Esc` transferi iptal eder (o ana kadar aktarılanlar hedefte kalır).
+
 ## Bilinen sınırlar (skeleton — sonraki adımlar)
 
-- Sadece **dosya** transferi; klasör (recursive) desteği yok.
-- Transferler artık ayrı bir tokio task'inde, parça parça (64 KiB) yapılır ve
-  `mpsc` ile ortada bir **progress bar** gösterilir — UI bloklanmaz. Transfer
-  sırasında `q`/`Esc` ile iptal edilebilir.
+- Transferler ayrı bir tokio task'inde, parça parça (64 KiB) yapılır ve `mpsc`
+  ile ortada bir **progress bar** gösterilir — UI bloklanmaz.
+- Dosya izinleri/zaman damgaları korunmaz (SFTP `create` varsayılanı).
 - Sunucu anahtarı doğrulanmıyor (`check_server_key` daima `true`).
   Prod'da `known_hosts` kontrolü ekle.
 - Sadece parola kimlik doğrulaması; anahtar (publickey) auth eklenebilir.

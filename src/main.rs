@@ -583,6 +583,8 @@ async fn run_transfer(
         name: req.name.clone(),
         done: 0,
         total: 0,
+        label: None,
+        files: None,
     });
 
     // I/O ayrı task'te — ana döngüyü bloklamaz.
@@ -600,7 +602,8 @@ async fn run_transfer(
                     .download(&req_task.remote_path, &req_task.local_path, &tx)
                     .await
             }
-            _ => Ok(()),
+            // Aynı panel: `queue_transfer` zaten engelliyor.
+            _ => Ok(ssh::TreeOutcome::default()),
         }
     });
 
@@ -613,15 +616,26 @@ async fn run_transfer(
                 if let Some(t) = app.transfer.as_mut() {
                     t.done = p.done;
                     t.total = p.total;
+                    t.label = p.label;
+                    t.files = p.files;
                 }
             }
             // Transfer tamamlandı (ya da hata / iptal)
             res = &mut handle => {
                 app.transfer = None;
                 match res {
-                    Ok(Ok(())) => {
-                        ok = true;
-                        app.status = format!("Tamamlandı: {}", req.name);
+                    Ok(Ok(outcome)) => {
+                        // Tek tük dosya hatası transferi durdurmaz; ama sessizce
+                        // "tamamlandı" da demeyelim.
+                        ok = outcome.errors == 0;
+                        app.status = match &outcome.first_error {
+                            Some(e) => format!(
+                                "{} — {} · ilk hata: {e}",
+                                req.name,
+                                outcome.summary()
+                            ),
+                            None => format!("Tamamlandı: {} — {}", req.name, outcome.summary()),
+                        };
                         // Hedef paneli tazele.
                         match req.target {
                             PanelId::Remote => {

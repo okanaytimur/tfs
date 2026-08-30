@@ -110,9 +110,14 @@ pub struct EditRequest {
 
 /// Devam eden transferin UI'da gösterilen ilerlemesi.
 pub struct TransferState {
+    /// Transferin kökü (sürüklenen/seçilen dosya ya da klasör adı).
     pub name: String,
     pub done: u64,
     pub total: u64,
+    /// Şu an ne yapılıyor: "taranıyor…" ya da aktarılan dosyanın köke göre yolu.
+    pub label: Option<String>,
+    /// (tamamlanan, toplam) dosya sayısı — klasör transferinde dolu.
+    pub files: Option<(u32, u32)>,
 }
 
 pub struct App {
@@ -232,8 +237,8 @@ impl App {
     ///
     /// Hedef yol daima **karşı panelin o anki dizini** + aynı dosya adıdır.
     fn queue_transfer(&mut self, source: PanelId, entry: &Entry, target: PanelId) {
-        if entry.is_dir {
-            self.status = "Klasör transferi henüz desteklenmiyor (skeleton).".into();
+        if entry.is_dir && entry.name == ".." {
+            self.status = "Üst dizin (`..`) aktarılamaz.".into();
             return;
         }
         if source == target {
