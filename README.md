@@ -20,22 +20,29 @@ cargo install tfs-ssh
 > crates.io'da `tfs` adı başkasına ait olduğu için paket adı **`tfs-ssh`**;
 > kurulan komut yine **`tfs`**'tir.
 
-### Hazır Windows sürümleri (derlemeye gerek yok)
+### Hazır sürümler (derlemeye gerek yok)
 
 [**Releases**](https://github.com/okanaytimur/tfs/releases) sayfasından hazır
-`.exe` indirebilirsiniz:
+binary indirebilirsiniz:
 
-| Dosya | Mimari | Not |
-|-------|--------|-----|
-| `tfs-vX-windows-x86_64.exe` | 64-bit | Önerilen |
-| `tfs-vX-windows-i686.exe` | 32-bit | Eski/32-bit Windows |
+| Dosya | Platform | Not |
+|-------|----------|-----|
+| `tfs-vX-linux-x86_64` | Linux x86_64 | glibc 2.34+ · indirdikten sonra `chmod +x` |
+| `tfs-vX-windows-x86_64.exe` | Windows 10+ 64-bit | Önerilen |
+| `tfs-vX-windows-i686.exe` | Windows 10+ 32-bit | Eski/32-bit Windows |
 
 İndirdikten sonra yanına bir `config.json` koyup çalıştırın (bkz. Yapılandırma).
 
-**Platform desteği**: Windows 10 ve üzeri. Windows 7/8 desteklenmez — Rust 1.78'den
-beri standart Windows hedefi Win7'yi bırakmıştır (binary'ler Win10+ ister). Win7
-ancak Tier-3 `*-win7-windows-msvc` hedefi + nightly + `-Z build-std` ile derlenebilir
+**Platform desteği**: Linux (glibc 2.34+ — Ubuntu 22.04+, Debian 12+, RHEL 9+)
+ve Windows 10 ve üzeri. Windows 7/8 desteklenmez — Rust 1.78'den beri standart
+Windows hedefi Win7'yi bırakmıştır (binary'ler Win10+ ister). Win7 ancak Tier-3
+`*-win7-windows-msvc` hedefi + nightly + `-Z build-std` ile derlenebilir
 (deneysel, kripto/async yığınımızla test edilmedi).
+
+Linux'ta pano (kopyala/yapıştır) X11 ve Wayland'da çalışır, ek sistem
+kütüphanesi gerekmez; binary yalnızca `libc`/`libm`/`libgcc_s`'e bağlıdır.
+Kaynaktan derlemek için bir C linker gerekir (`dnf install gcc` /
+`apt install build-essential`).
 
 ## Yapılandırma
 

@@ -328,7 +328,7 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 - [x] **`t` / F5** → odaklı paneldeki seçili dosyayı karşı panele aktar.
       `App::request_transfer_selected`; sürükle-bırakla ortak `queue_transfer`
       (eski `request_transfer` artık onun ince bir sarmalayıcısı).
-- [ ] Elle doğrula (her iki yön).
+- [ ] Elle doğrula (her iki yön) — v0.3.0 hazırlanırken henüz denenmemişti.
 
 ## 5.1 Sürüm uyumu — ÇÖZÜLDÜ (önemli not)
 `tui-term 0.3.x` → `vt100 0.16.2` → `unicode-width ^0.2.1` ister; bu, `ratatui
@@ -348,17 +348,18 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> Aşama 6 (fresh entegrasyonu) kodlandı ama **derlenmedi** — bu Fedora makinasında
-> C linker yok.
+> **v0.3.0 hazır ama yayınlanmadı.** Yapılacaklar "## 12"de listeli:
 >
-> 1. `sudo dnf install -y gcc` → `cargo clippy --all-targets` → `cargo test`.
-> 2. **Linux derlemesi** (bkz. "## 11") — `arboard`ın Wayland yolu burada ilk kez
->    sınanacak; patlarsa `wayland-data-control` özelliğini boşalt.
-> 3. Gerçek sunucuda F4 akışını elle doğrula (Aşama 6 kutucukları).
-> 4. Sürüm `0.3.0` + release (komut şablonu "## 12").
+> 1. `git push origin main` + `git push origin v0.3.0`.
+> 2. `cargo publish --dry-run` → `cargo publish` (crates.io girişi gerekir).
+> 3. Windows makinada iki `.exe`yi derle, `gh release create v0.3.0 …`.
 >
-> Henüz elle denenmemiş olanlar (fırsat oldukça): `vim`/`htop` tam ekran,
-> tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
+> Sonraki iş (kod): "## 9.C" — `known_hosts` doğrulaması + publickey auth
+> (güvenlik borcu), klasör (recursive) transferi, bağlantı kopunca yeniden
+> bağlanma.
+>
+> Henüz elle denenmemiş olanlar (fırsat oldukça): `t`/F5 transfer, `vim`/`htop`
+> tam ekran, tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
 
 ## 8. Bağlam (kod referansları)
 - Kabuk kanalı: `src/ssh.rs` — `Ssh::open_shell(cols, rows)` aynı bağlantıda
@@ -516,21 +517,49 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 
 ---
 
-## 12. v0.2.0 yayın komutları (2026-08-01)
-
-Sürüm `Cargo.toml`'da 0.2.0'a çıkarıldı, `cargo package` doğrulandı. Release
-notları: `dist/RELEASE-v0.2.0.md` (dist gitignore'lu). Komutlar kullanıcıda.
-
-```powershell
-# Çalışan tfs.exe varsa kapat (target kilitlenmesin)
-cargo clippy --all-targets; cargo test; cargo build --release
-git add -A; git commit; git tag v0.2.0
-git push origin main; git push origin v0.2.0
-cargo build --release --target i686-pc-windows-msvc
-gh release create v0.2.0 <exe'ler> --notes-file dist\RELEASE-v0.2.0.md
-cargo publish --dry-run; cargo publish
-```
+## 12. Yayın adımları
 
 > `cargo publish` geri alınamaz (yalnızca `yank`). Önce `--dry-run`.
+> Sonraki sürümlerde: `Cargo.toml`'da `version` artır → aynı adımlar.
 
-Sonraki sürümlerde: `Cargo.toml`'da `version` artır → aynı adımlar.
+### v0.3.0 (2026-08-30) — Linux'ta hazırlandı, YAYINLANMADI
+
+Yapıldı (bu makinada):
+- [x] Sürüm 0.3.0, `Cargo.toml` açıklaması güncellendi, `Cargo.lock` tazelendi.
+- [x] `cargo clippy --all-targets` temiz · `cargo test` 16/16 · release derlendi.
+- [x] `cargo package` doğrulandı (`config.example.json` + `src/editor.rs` pakette).
+- [x] Linux binary: `dist/tfs-v0.3.0-linux-x86_64` (5.4 MB, strip'li).
+      Gerçek asgari **glibc 2.34** (2.39 sembolleri *zayıf*, sorun değil).
+- [x] Release notları: `dist/RELEASE-v0.3.0.md`.
+- [x] Commit + `v0.3.0` etiketi.
+
+Kalan (bu makinada yapılamaz — `gh` yok, git/crates.io kimliği yok):
+```sh
+git push origin main && git push origin v0.3.0
+cargo publish --dry-run && cargo publish       # crates.io girişi gerekir
+```
+Windows binary'leri **Windows makinada** derlenmeli (msvc hedefi):
+```powershell
+cargo build --release                                  # x86_64
+cargo build --release --target i686-pc-windows-msvc    # i686
+```
+Sonra release:
+```sh
+gh release create v0.3.0 \
+  dist/tfs-v0.3.0-linux-x86_64 \
+  dist/tfs-v0.3.0-windows-x86_64.exe \
+  dist/tfs-v0.3.0-windows-i686.exe \
+  --notes-file dist/RELEASE-v0.3.0.md
+```
+
+### İsteğe bağlı — musl statik Linux binary'si
+glibc 2.34 altındaki dağıtımları (Ubuntu 20.04, Debian 11, CentOS 7) da
+kapsamak için. `ring`'in C kodu musl derleyicisi ister:
+```sh
+sudo dnf install -y musl-gcc          # Fedora paketi mevcut (1.2.5)
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+### v0.2.0 (2026-08-01) — yayınlandı
+crates.io + GitHub Releases (Windows x86_64 + i686).

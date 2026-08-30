@@ -1,8 +1,8 @@
 [package]
 name = "tfs-ssh"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "tfs — fare öncelikli SSH dosya tarayıcısı (F2) + modern SSH terminali (F1). Tek bağlantı, iki mod."
+description = "tfs — fare öncelikli SSH dosya tarayıcısı (F2) + modern SSH terminali (F1) + F4 ile uzak dosyayı fresh editöründe düzenleme. Tek bağlantı, tek araç."
 authors = ["Okan Aytimur"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/okanaytimur/tfs"
