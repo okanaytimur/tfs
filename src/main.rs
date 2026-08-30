@@ -7,6 +7,7 @@
 
 mod app;
 mod config;
+mod editor;
 mod picker;
 mod ssh;
 mod terminal;
@@ -28,14 +29,46 @@ use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
 
-use crate::app::{App, PanelId, TransferRequest, TransferState};
+use crate::app::{App, EditRequest, PanelId, TransferRequest, TransferState};
 use crate::config::{Config, Loaded};
 use crate::ssh::Ssh;
 use crate::terminal::TermSession;
 
 /// Olay akışı. `Peekable`, yapıştırma yığınını toplarken sıradaki olayı
-/// tüketmeden yoklayabilmek için gerekli (bkz. `drain_key_burst`).
-type Events = futures::stream::Peekable<EventStream>;
+/// tüketmeden yoklayabilmek için gerekli (bkz. `collect_key_burst`).
+pub(crate) type Events = futures::stream::Peekable<EventStream>;
+
+/// Olay akışının sahibi. Harici bir program (editör, kurulum) çalışırken akış
+/// **kapatılır**, sonra tembel olarak yeniden kurulur.
+///
+/// Neden `Option` — yani neden akışı `mem::replace` ile değiştirmiyoruz:
+/// crossterm'in `EventStream`'i kurulurken global okuyucu kilidini alır
+/// (`stream.rs`: `lock_internal_event_reader().waker()`), o kilidi ise
+/// **yoklanmış** bir akışın arka plan thread'i `poll_internal(None, …)` içinde
+/// süresiz tutar (`event.rs`: zaman aşımı yoksa `lock_internal_event_reader()`
+/// alınır ve bloklayan `poll` boyunca elde kalır). Dolayısıyla eskisini
+/// düşürmeden yenisini kurmak **kilitlenir**: yeni akış, eski akışın thread'inin
+/// beklediği kilidi bekler ve o thread'i uyandıracak olan `Drop` hiç çalışmaz.
+/// Önce düşür, sonra kur.
+pub(crate) struct EventSource(Option<Events>);
+
+impl EventSource {
+    fn new() -> Self {
+        Self(Some(EventStream::new().peekable()))
+    }
+
+    /// Akışa erişim; kapatılmışsa yeniden kurar.
+    pub(crate) fn get(&mut self) -> &mut Events {
+        self.0.get_or_insert_with(|| EventStream::new().peekable())
+    }
+
+    /// Akışı düşürür: `EventStream::drop` okuyucu thread'ini uyandırır, thread
+    /// tty'yi ve global kilidi bırakır. Alt süreç başlatmadan önce şart —
+    /// yoksa kullanıcının tuşları ona değil bize gider.
+    pub(crate) fn shutdown(&mut self) {
+        self.0 = None;
+    }
+}
 
 /// Aktif ekran (mod). F1 → Terminal, F2 → Dosya transferi.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -124,7 +157,7 @@ async fn run(
     ssh: Arc<Ssh>,
     server_name: String,
 ) -> Result<()> {
-    let mut events = EventStream::new().peekable();
+    let mut events = EventSource::new();
     let mut screen = Screen::FileTransfer;
 
     // Kabuk oturumu ilk F1'de tembel açılır, sonra uygulama boyunca canlı tutulur.
@@ -173,7 +206,7 @@ async fn run(
         if let Some(k) = pending_burst.take() {
             if let Some(t) = term.as_mut() {
                 t.send_key(k).await;
-                let rest = collect_key_burst(&mut events).await;
+                let rest = collect_key_burst(events.get()).await;
                 if let Some(l) = keylog.as_mut() {
                     l.write(&format!("BURST {} karakter toplandı", rest.chars().count()));
                 }
@@ -221,9 +254,15 @@ async fn run(
             continue;
         }
 
+        // Bekleyen düzenleme (F4) — editör TUI'yi askıya alıp geri getirir.
+        if let Some(req) = app.pending_edit.take() {
+            run_edit(terminal, app, &ssh, req, &mut events, &server_name).await?;
+            continue;
+        }
+
         // --- Olay bekleme: klavye/fare + kabuk çıktısı ---
         tokio::select! {
-            maybe_ev = events.next() => {
+            maybe_ev = events.get().next() => {
                 match maybe_ev {
                     Some(Ok(ev)) => {
                         if let Some(l) = keylog.as_mut() {
@@ -528,10 +567,12 @@ async fn run_transfer(
     app: &mut App,
     ssh: &Arc<Ssh>,
     req: TransferRequest,
-    events: &mut Events,
+    events: &mut EventSource,
     server_name: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let (tx, mut rx) = mpsc::unbounded_channel();
+    // Çağıran (ör. `run_edit`) transferin gerçekten bittiğini bilmeli.
+    let mut ok = false;
 
     let verb = match req.target {
         PanelId::Remote => "Yükleniyor",
@@ -579,6 +620,7 @@ async fn run_transfer(
                 app.transfer = None;
                 match res {
                     Ok(Ok(())) => {
+                        ok = true;
                         app.status = format!("Tamamlandı: {}", req.name);
                         // Hedef paneli tazele.
                         match req.target {
@@ -599,7 +641,7 @@ async fn run_transfer(
                 break;
             }
             // Kullanıcı olayı: sadece iptal (q/Esc) dinle.
-            maybe = events.next() => {
+            maybe = events.get().next() => {
                 if let Some(Ok(Event::Key(k))) = maybe {
                     if k.kind == KeyEventKind::Press
                         && matches!(k.code, KeyCode::Char('q') | KeyCode::Esc)
@@ -613,23 +655,212 @@ async fn run_transfer(
             }
         }
     }
+    Ok(ok)
+}
+
+/// F4 akışı: dosyayı `fresh` editöründe açar.
+///
+/// Yerel dosya doğrudan açılır. Uzak dosya geçici bir dizine indirilir, editör
+/// kapandıktan sonra **içeriği değiştiyse** geri yüklenir — böylece uzak
+/// sunucuda editör kurulu olmasına gerek kalmaz.
+///
+/// Editör tam ekran çalıştığı için TUI askıya alınır; bu, `select!` içinde
+/// yapılamaz (hem `terminal` hem `events` sahipliği gerekir), o yüzden
+/// transferlerdeki gibi döngü başında, bayrak üzerinden çağrılır.
+async fn run_edit(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    ssh: &Arc<Ssh>,
+    req: EditRequest,
+    events: &mut EventSource,
+    server_name: &str,
+) -> Result<()> {
+    // 1) Editörü bul; yoksa kurulumu teklif et.
+    let bin = match editor::locate() {
+        Some(b) => b,
+        None => {
+            if !confirm_install(terminal, app, events, server_name).await? {
+                app.status = format!("Düzenleme iptal — {} kurulu değil.", editor::CRATE);
+                return Ok(());
+            }
+            match editor::install(terminal, events).await? {
+                editor::Installed::Ok(b) => {
+                    app.status = format!("{} kuruldu.", editor::CRATE);
+                    b
+                }
+                editor::Installed::Failed(why) => {
+                    app.status = format!("Kurulum başarısız: {why}");
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    match req.panel {
+        // Yerel dosya: kopya yok, doğrudan aç.
+        PanelId::Local => {
+            // Liste içeriği değişmedi (dosya adı/varlığı aynı), bu yüzden
+            // paneli yenilemiyoruz — yenileme kullanıcının imlecini sıfırlardı.
+            let err = editor::open(terminal, events, &bin, &req.local_path)
+                .await
+                .err();
+            app.status = match err {
+                Some(e) => format!("Editör hatası: {e}"),
+                None => format!("Düzenlendi: {}", req.name),
+            };
+        }
+
+        // Uzak dosya: indir → düzenle → (değiştiyse) geri yükle.
+        PanelId::Remote => {
+            let size = ssh
+                .sftp
+                .metadata(&req.remote_path)
+                .await
+                .ok()
+                .and_then(|m| m.size)
+                .unwrap_or(0);
+            if size > editor::MAX_EDIT_BYTES {
+                app.status = format!(
+                    "{} çok büyük ({} MiB) — düzenleme için sınır {} MiB.",
+                    req.name,
+                    size / (1024 * 1024),
+                    editor::MAX_EDIT_BYTES / (1024 * 1024)
+                );
+                return Ok(());
+            }
+
+            // Geçici dizin açılamazsa (disk dolu, /tmp salt-okunur…) uygulamayı
+            // düşürmek yerine durum çubuğunda söyle.
+            let tmp = match editor::temp_file_for(&req.name) {
+                Ok(t) => t,
+                Err(e) => {
+                    app.status = format!("Geçici dosya açılamadı: {e}");
+                    return Ok(());
+                }
+            };
+
+            let download = TransferRequest {
+                source: PanelId::Remote,
+                target: PanelId::Local,
+                name: req.name.clone(),
+                local_path: tmp.clone(),
+                remote_path: req.remote_path.clone(),
+            };
+            // `run_transfer` hedef paneli (burada YEREL) tazeler ve seçimi
+            // sıfırlar; oysa indirdiğimiz yer geçici dizin — kullanıcının yerel
+            // paneldeki imleci yerinde kalmalı.
+            let local_sel = app.selected_name(PanelId::Local);
+            let ok = run_transfer(terminal, app, ssh, download, events, server_name).await?;
+            if let Some(name) = &local_sel {
+                app.select_by_name(PanelId::Local, name);
+            }
+            if !ok {
+                editor::cleanup_temp(&tmp);
+                return Ok(());
+            }
+
+            // Editör dosyaya hiç dokunmamış olabilir (ya da kaydedip aynı içeriği
+            // yazmış olabilir); gereksiz yüklemeyi önlemek için içerik özeti.
+            let before = editor::content_hash(&tmp).ok();
+            let err = editor::open(terminal, events, &bin, &tmp).await.err();
+            let after = editor::content_hash(&tmp).ok();
+
+            // Özet alınamadıysa (ör. editör dosyayı sildi) yüklemeyi deneme.
+            if after.is_none() {
+                editor::cleanup_temp(&tmp);
+                app.status = format!("{} okunamadı — yükleme yapılmadı.", req.name);
+                return Ok(());
+            }
+            if before == after {
+                editor::cleanup_temp(&tmp);
+                app.status = match err {
+                    Some(e) => format!("Editör hatası: {e}"),
+                    None => format!("{} değişmedi — yükleme yapılmadı.", req.name),
+                };
+                return Ok(());
+            }
+
+            let upload = TransferRequest {
+                source: PanelId::Local,
+                target: PanelId::Remote,
+                name: req.name.clone(),
+                local_path: tmp.clone(),
+                remote_path: req.remote_path.clone(),
+            };
+            if run_transfer(terminal, app, ssh, upload, events, server_name).await? {
+                editor::cleanup_temp(&tmp);
+                app.select_by_name(PanelId::Remote, &req.name);
+                app.status = format!("✓ {} kaydedildi ve sunucuya yüklendi.", req.name);
+            } else {
+                // Geçici dosya BİLEREK silinmiyor: kullanıcının emeği burada.
+                app.status = format!(
+                    "Yükleme başarısız — değişiklikleriniz burada: {}",
+                    tmp.display()
+                );
+            }
+        }
+    }
     Ok(())
 }
 
+/// "fresh kurulu değil, kurulsun mu?" onayı. Mevcut dosya ekranının üzerine
+/// bir kutu çizip yalnızca evet/hayır tuşlarını dinler.
+async fn confirm_install(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    events: &mut EventSource,
+    server_name: &str,
+) -> Result<bool> {
+    let plan = editor::install_plan();
+    loop {
+        terminal.draw(|f| {
+            ui::draw(f, app, server_name);
+            editor::draw_install_prompt(f, &plan);
+        })?;
+
+        match events.get().next().await {
+            Some(Ok(Event::Key(k))) if k.kind == KeyEventKind::Press => match k.code {
+                // cargo yoksa kurulacak bir şey de yok; yalnızca kapatılır.
+                KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Enter if !plan.is_empty() => {
+                    return Ok(true)
+                }
+                KeyCode::Char('h')
+                | KeyCode::Char('H')
+                | KeyCode::Char('q')
+                | KeyCode::Enter
+                | KeyCode::Esc => return Ok(false),
+                _ => {}
+            },
+            Some(Ok(_)) => {}
+            Some(Err(e)) => return Err(e.into()),
+            None => return Ok(false),
+        }
+    }
+}
+
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    enter_tui(&mut terminal)?;
+    Ok(terminal)
+}
+
+/// TUI kipine gir(ilir): ham mod + alternatif ekran + fare + bracketed paste.
+/// Açılışta ve harici bir editörden döndükten sonra kullanılır; `clear()`
+/// ratatui'nin önceki kare önbelleğini geçersiz kılar, böylece alt sürecin
+/// ekranda bıraktığı hiçbir şey kalmaz.
+pub(crate) fn enter_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
     execute!(
-        stdout,
+        terminal.backend_mut(),
         EnterAlternateScreen,
         EnableMouseCapture,
         EnableBracketedPaste
     )?;
-    let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    terminal.clear()?;
+    Ok(())
 }
 
-fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

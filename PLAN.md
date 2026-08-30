@@ -4,7 +4,7 @@
 > bunu oku; "Durum" bölümündeki kutucuklardan (`[ ]` / `[x]`) nerede kaldığımızı
 > gör ve "Sıradaki adım"dan devam et.
 
-Son güncelleme: 2026-07-31
+Son güncelleme: 2026-08-30
 
 > **DURUM: Aşama 0–4 + bug düzeltmeleri tamam, çalışır durumda (clippy temiz).**
 > F1 SSH terminali + F2 dosya transferi entegre edildi.
@@ -97,6 +97,56 @@ Son güncelleme: 2026-07-31
 > Yayın komutları kullanıcıya verildi (kullanıcı kendisi çalıştırıyor).
 > 📌 SONRAKİ: Linux sürümü (bkz "## 11").
 >
+> **2026-08-30 (Aşama 6 — fresh editör entegrasyonu):**
+> - ✅ **F4 / `e` → dosyayı [`fresh`](https://github.com/sinelaw/fresh) ile düzenle**
+>   (yeni modül `src/editor.rs`, ~430 satır + testler).
+>   - YEREL panel: dosya olduğu yerde açılır.
+>   - UZAK panel: geçici dizine indir → editörde aç → **içerik değiştiyse**
+>     SFTP ile geri yükle. Uzak sunucuda editör kurulu olmasına gerek yok.
+>   - Değişiklik tespiti **içerik özetiyle** (FNV-1a 64-bit, akış hâlinde),
+>     zaman damgasıyla değil — editör kaydetmeden kapansa da yükleme olmaz.
+>   - İndirme/yükleme mevcut progress bar'ı kullanır (`run_transfer` artık
+>     `Result<bool>` döndürüyor; çağıran başarıyı bilmeli).
+>   - Yükleme başarısızsa geçici dosya **bilerek silinmez** — kullanıcının emeği
+>     orada; yol durum çubuğunda yazar.
+>   - Uzak dosya sınırı 64 MiB (`editor::MAX_EDIT_BYTES`).
+> - ✅ **Kurulum: `cargo binstall`**. `fresh` yoksa TUI'de onay kutusu çıkar;
+>   onaylanırsa sıra: `cargo binstall --no-confirm fresh-editor` → yoksa önce
+>   `cargo install cargo-binstall` → son çare `cargo install --locked
+>   fresh-editor`. Çıktı düz terminalde akar. crates.io paketi **`fresh-editor`**,
+>   binary **`fresh`** (0.4.10, GPL-2.0). Yeni Rust bağımlılığı YOK.
+> - ⚠️ **Kritik ayrıntı — TUI askıya alma**: editör çalışırken crossterm
+>   `EventStream`'i **düşürülmeli**. `poll_next` Pending dönünce crossterm arka
+>   planda bir thread'i tty üzerinde bloklayan okumaya sokuyor
+>   (`event/stream.rs`); bu thread ayakta kalırsa kullanıcının tuşları editöre
+>   değil bize gelir.
+> - 🐞 **DEADLOCK — ilk deneme böyle patladı, tekrar yapma.** `editor::suspend`
+>   önce `mem::replace(events, EventStream::new().peekable())` yapıyordu: yeni
+>   akış **eskisi düşürülmeden önce** kuruluyor. Ama:
+>   - `EventStream::default()` kurulurken `lock_internal_event_reader()` ile
+>     **global okuyucu mutex'ini** alır (`stream.rs:64`),
+>   - yoklanmış bir akışın arka plan thread'i ise aynı mutex'i
+>     `poll_internal(None, …)` içinde **bloklayan `poll` boyunca elde tutar**
+>     (`event.rs:256-270` — zaman aşımı yoksa `lock_internal_event_reader()`).
+>
+>   Yani yeni akış, eski akışın thread'inin tuttuğu kilidi bekler; o thread'i
+>   uyandıracak olan `Drop` ise henüz çalışmamıştır → **kilitlenme**.
+>   Belirti: *yerel* F4 çalışıyor (tuş geldiği an thread kilidi bırakmış olur),
+>   *uzak* F4'te tfs "kapanıyor" gibi görünüp asılıyor — çünkü araya giren
+>   `run_transfer`'ın `select!`'i `events`'i yoklayıp thread'i yeniden
+>   bloklatıyor, indirme başka koldan bitince o thread serbest kalmıyor;
+>   `suspend` ise ilk iş `restore_terminal` yaptığı için ekran normale döndüğünden
+>   uygulama kapanmış sanılıyor.
+>
+>   **Çözüm**: `main::EventSource` (`Option<Events>`) — `shutdown()` akışı
+>   **önce düşürür**, `get()` ise ihtiyaç anında (alt süreç bittikten sonra)
+>   tembel yeniden kurar. Sırayı bozma: önce düşür, sonra kur.
+> - `main.rs`: `setup_terminal` → `enter_tui` olarak ayrıştırıldı (geri dönüşte
+>   `terminal.clear()` şart, yoksa ratatui eski kareyi geçerli sanar).
+> - 🔴 **DERLENMEDİ**: bu Fedora makinasında `gcc` yok (`error: linker \`cc\` not
+>   found`). `sudo dnf install -y gcc` sonrası `cargo clippy --all-targets` +
+>   `cargo test` + gerçek sunucuda F4 testi YAPILMALI.
+
 > Kalan öneriler → "## 9.C". Derleme/dağıtım → "## 10". Devam için ilgili bölüme bak.
 
 ---
@@ -258,6 +308,22 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 
 ---
 
+### Aşama 6 — fresh editör entegrasyonu (2026-08-30)
+- [x] `src/editor.rs`: `locate` (PATH + `~/.cargo/bin` + `~/.local/bin`),
+      `suspend`/`resume`, `run_suspended`, `install`, `content_hash`,
+      `temp_file_for`/`cleanup_temp`, `draw_install_prompt`.
+- [x] `app.rs`: `EditRequest` + `pending_edit` + `request_edit`, F4/`e` tuşu.
+- [x] `main.rs`: `run_edit` (yerel/uzak akışları), `confirm_install`,
+      `enter_tui`, `run_transfer` → `Result<bool>`.
+- [x] README: "F4 — dosyayı `fresh` ile düzenle" bölümü.
+- [x] Linux'ta derleme + clippy temiz + `cargo test` 16/16 (2026-08-30, gcc kuruldu).
+- [x] `main::EventSource` — askıya alma kilitlenmesi düzeltildi (bkz. üstteki 🐞).
+- [x] Kullanıcı testi: **YEREL** F4 çalışıyor.
+- [ ] Kullanıcı testi: **UZAK** F4 (deadlock düzeltmesinden sonra tekrar).
+- [ ] Kaydetmeden çık → yükleme olmamalı. Kurulum akışı (`PATH=` ile dene).
+- [x] 🐞 `temp_file_for` aynı milisaniyede çakışıyordu (pid+ms yetmiyor) →
+      dizin artık münhasıran açılıyor (`create_dir` + sayaç), test eklendi.
+
 ## 5.1 Sürüm uyumu — ÇÖZÜLDÜ (önemli not)
 `tui-term 0.3.x` → `vt100 0.16.2` → `unicode-width ^0.2.1` ister; bu, `ratatui
 0.29`'un `unicode-width =0.2.0` sabitiyle **çakışır**. Çözüm: `tui-term = "=0.2.0"`
@@ -276,12 +342,14 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> Aşama 5 bitti; çalışma ağacında **commit'lenmemiş** değişiklikler var
-> (`Cargo.toml`, `Cargo.lock`, `main.rs`, `terminal.rs`, `ui.rs`).
+> Aşama 6 (fresh entegrasyonu) kodlandı ama **derlenmedi** — bu Fedora makinasında
+> C linker yok.
 >
-> 1. ✅ Elle test edildi: seçme/kopyalama, sağ tık yapıştırma, Ctrl+V & arkadaşları.
-> 2. **v0.2.0 yayını** — komutlar "## 12"de; kullanıcı çalıştırıyor.
-> 3. **Linux sürümü** (bkz. "## 11") — `arboard` yeni bağımlılık, orada doğrula.
+> 1. `sudo dnf install -y gcc` → `cargo clippy --all-targets` → `cargo test`.
+> 2. **Linux derlemesi** (bkz. "## 11") — `arboard`ın Wayland yolu burada ilk kez
+>    sınanacak; patlarsa `wayland-data-control` özelliğini boşalt.
+> 3. Gerçek sunucuda F4 akışını elle doğrula (Aşama 6 kutucukları).
+> 4. Sürüm `0.3.0` + release (komut şablonu "## 12").
 >
 > Henüz elle denenmemiş olanlar (fırsat oldukça): `vim`/`htop` tam ekran,
 > tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
@@ -298,6 +366,8 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 - Üst çubuk: `terminal::draw_top_bar` hem `ui::draw` (dosya) hem `terminal::draw`
   tarafından kullanılıyor.
 - Tuş çift-algılama: tüm giriş noktalarında `KeyEventKind::Press` filtresi var.
+- Editör: `src/editor.rs` (mekanik) + `main.rs::run_edit` (akış). Askıya alma
+  deseni için üstteki 2026-08-30 notundaki `EventStream` uyarısını oku.
 
 ---
 
@@ -418,6 +488,12 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > - Cross-compile yerine gerçek Linux'ta derlemek en temizi (glibc uyumu için
 >   mümkünse eski bir dağıtım ya da `x86_64-unknown-linux-musl` ile statik binary).
 > - CI (GitHub Actions) ile Win+Linux otomatik release ileride düşünülebilir.
+>
+> ✅ **2026-08-30 DOĞRULANDI (Fedora 44, rustc 1.97.1)**: `cargo build --release`
+> sorunsuz; binary 7.5 MB ELF. `ldd`: yalnızca `libc`/`libm`/`libgcc_s` —
+> **X11/Wayland sistem kütüphanesi gerekmedi**, yani aşağıdaki `arboard` endişesi
+> geçersiz çıktı (`wayland-data-control` özelliği kalabilir). Tek ön koşul: C
+> linker (`gcc`) — Fedora'da `dnf install gcc`.
 >
 > **DİKKAT — `arboard` (2026-07-31 eklendi)**: Linux'ta pano için `x11rb` (saf Rust,
 > sistem kütüphanesi istemez) + `wayland-data-control` özelliğiyle `wl-clipboard-rs`

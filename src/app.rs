@@ -95,6 +95,19 @@ pub struct TransferRequest {
     pub remote_path: String,
 }
 
+/// F4 ile doğan düzenleme isteği; ana döngü bunu alıp editörü açar
+/// (bkz. `main::run_edit`).
+#[derive(Clone)]
+pub struct EditRequest {
+    /// Dosyanın hangi panelden geldiği. `Remote` ise indir → düzenle → yükle.
+    pub panel: PanelId,
+    pub name: String,
+    /// Yerel panelde: düzenlenecek dosya. Uzak panelde: kullanılmaz.
+    pub local_path: PathBuf,
+    /// Uzak panelde: indirilecek/geri yüklenecek yol. Yerelde boş.
+    pub remote_path: String,
+}
+
 /// Devam eden transferin UI'da gösterilen ilerlemesi.
 pub struct TransferState {
     pub name: String,
@@ -113,6 +126,8 @@ pub struct App {
     pub pending_transfer: Option<TransferRequest>,
     /// Devam eden transferin ilerlemesi (progress bar için).
     pub transfer: Option<TransferState>,
+    /// Bekleyen düzenleme isteği; ana döngü editörü açar.
+    pub pending_edit: Option<EditRequest>,
 }
 
 impl App {
@@ -122,10 +137,11 @@ impl App {
             remote: Panel::new(),
             focus: PanelId::Local,
             drag: None,
-            status: "Fareyle sürükle-bırak ile transfer. q: çıkış".into(),
+            status: "Sürükle-bırak: transfer · F4/e: fresh ile düzenle · q: çıkış".into(),
             should_quit: false,
             pending_transfer: None,
             transfer: None,
+            pending_edit: None,
         }
     }
 
@@ -247,6 +263,57 @@ impl App {
         }
     }
 
+    /// Panelde adı verilen girdiyi seçer (varsa). Bir yenilemeden sonra
+    /// kullanıcının imlecini kaybetmemek için: `load_local`/`load_remote`
+    /// seçimi sıfırlar.
+    pub fn select_by_name(&mut self, panel: PanelId, name: &str) {
+        let p = self.panel_mut(panel);
+        if let Some(idx) = p.entries.iter().position(|e| e.name == name) {
+            p.selected = idx;
+            p.clamp_scroll();
+        }
+    }
+
+    /// Panelde o an seçili olan girdinin adı (yenileme öncesi saklamak için).
+    pub fn selected_name(&self, panel: PanelId) -> Option<String> {
+        let p = self.panel_ref(panel);
+        p.entries.get(p.selected).map(|e| e.name.clone())
+    }
+
+    // --- Düzenleme (F4) ---
+
+    /// Odaklı panelde seçili dosya için bir düzenleme *isteği* oluşturur.
+    /// Gerçek iş (indirme, editörü açma, geri yükleme) ana döngüdedir
+    /// (`main::run_edit`) — editör TUI'yi askıya aldığı için burada yapılamaz.
+    fn request_edit(&mut self) {
+        let panel = self.focus;
+        let p = self.panel_ref(panel);
+        let entry = match p.entries.get(p.selected) {
+            Some(e) => e.clone(),
+            None => return,
+        };
+        if entry.is_dir {
+            self.status = "Klasör düzenlenemez — bir dosya seçin.".into();
+            return;
+        }
+        let (local_path, remote_path) = match panel {
+            PanelId::Local => (
+                PathBuf::from(&self.local.cwd).join(&entry.name),
+                String::new(),
+            ),
+            PanelId::Remote => (
+                PathBuf::new(),
+                ssh::remote_join(&self.remote.cwd, &entry.name),
+            ),
+        };
+        self.pending_edit = Some(EditRequest {
+            panel,
+            name: entry.name,
+            local_path,
+            remote_path,
+        });
+    }
+
     // --- Olay işleme ---
 
     pub async fn handle_event(&mut self, ev: Event, ssh: &Ssh) -> Result<()> {
@@ -266,6 +333,8 @@ impl App {
     async fn handle_key(&mut self, code: KeyCode, ssh: &Ssh) -> Result<()> {
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+            // F4 (Norton/MC geleneği) ya da `e` → fresh editöründe aç.
+            KeyCode::F(4) | KeyCode::Char('e') => self.request_edit(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     PanelId::Local => PanelId::Remote,

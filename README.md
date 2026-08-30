@@ -3,6 +3,8 @@
 ratatui + russh + russh-sftp ile:
 - **F2** — iki panelli (YEREL ↔ UZAK), fareyle sürükle-bırak SFTP dosya transferi,
 - **F1** — PuTTY / Windows Terminal benzeri, tam ekran interaktif SSH terminali,
+- **F4** — seçili dosyayı [`fresh`](https://github.com/sinelaw/fresh) editöründe aç
+  (uzak dosya: indir → düzenle → otomatik geri yükle),
 
 hepsi tek SSH bağlantısı üzerinden (yeniden bağlanma yok).
 
@@ -144,6 +146,60 @@ promptlar ~1 sn bekleyip ekranı sıfırlıyordu.
 > Teşhis: `TFS_LOG=yol.txt` ortam değişkeniyle çalıştırırsanız sunucudan gelen ham
 > baytlar escape'lenmiş olarak o dosyaya yazılır (terminal sorunlarını incelemek için).
 
+## F4 — dosyayı `fresh` ile düzenle
+
+Dosya modunda (F2) bir dosya seçip **F4** (ya da **`e`**) tuşuna basınca dosya
+[`fresh`](https://github.com/sinelaw/fresh) editöründe açılır — VS Code / Sublime
+alışkanlıklarını terminale getiren, çoklu imleç ve LSP destekli bir editör.
+
+| Panel | Ne olur |
+|-------|---------|
+| **YEREL** | Dosya olduğu yerde açılır. |
+| **UZAK** | Dosya geçici bir dizine indirilir, editörde açılır; editör kapanınca **içeriği değiştiyse** SFTP ile geri yüklenir. Değişmediyse hiçbir şey yüklenmez. |
+
+Uzak sunucuda `fresh` kurulu olmasına **gerek yoktur** — düzenleme her zaman
+yerelde yapılır. Değişiklik tespiti içerik özetiyle (FNV-1a) yapılır, dosya
+zaman damgasıyla değil: editör dosyayı açıp kaydetmeden kapansa da, aynı içeriği
+tekrar yazsa da gereksiz yükleme olmaz. Uzak dosya sınırı **64 MiB**'tır (bu
+sınır transferi içindir; `fresh` çok daha büyük dosyaları açabilir).
+
+Editör açılırken tfs'in kendi arayüzü askıya alınır (ham mod kapatılır,
+alternatif ekrandan çıkılır ve klavye olay akışı bırakılır — aksi halde tuşlar
+editöre değil tfs'e giderdi); editör kapanınca arayüz geri gelir.
+
+### `fresh` kurulu değilse
+
+tfs onu sizin için kurmayı önerir:
+
+```
+┌ Editör kurulumu ─────────────────────────────────┐
+│ fresh editörü bulunamadı.                        │
+│                                                  │
+│ Şimdi kurulsun mu? Çalıştırılacak:               │
+│   $ cargo binstall --no-confirm fresh-editor     │
+│                                                  │
+│  E / Enter  kur     H / Esc  vazgeç              │
+└──────────────────────────────────────────────────┘
+```
+
+`cargo binstall` hazır derlenmiş binary'yi indirir (saniyeler). Sırayla denenir:
+
+1. `cargo binstall --no-confirm fresh-editor` — `cargo-binstall` kuruluysa.
+2. Değilse önce `cargo install cargo-binstall`, sonra (1).
+3. O da olmazsa son çare `cargo install --locked fresh-editor` (kaynaktan
+   derler, uzun sürer).
+
+Kurulum çıktısı doğrudan terminalde akar. Kurulu bir `fresh`i tfs, `PATH`'e ek
+olarak `~/.cargo/bin` ve `~/.local/bin` altında da arar — böylece kurulumdan
+hemen sonra, kabuk yeniden başlatılmadan bulunur.
+
+Editörü elle kurmak isterseniz:
+
+```sh
+cargo binstall fresh-editor      # hazır binary
+cargo install --locked fresh-editor   # kaynaktan
+```
+
 ## Kullanım
 
 - **Sürükle-bırak**: Bir dosyayı bir panelden diğerine fareyle sürükleyip bırak
@@ -153,6 +209,7 @@ promptlar ~1 sn bekleyip ekranı sıfırlıyordu.
 - **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin, `↑/↓` gezin, `q` çıkış.
 - **F1**: SSH terminaline geç · **F2**: dosya moduna dön. Üst çubuktaki
   `F1 Terminal` / `F2 Dosya` sekmelerine **fareyle de tıklanabilir**.
+- **F4** (ya da **`e`**): seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).
 
 ## Sunucu seçme ekranı
 
