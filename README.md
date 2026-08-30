@@ -1,7 +1,8 @@
 # tfs (terminal-file-send) — SSH dosya tarayıcısı + modern SSH terminali
 
 ratatui + russh + russh-sftp ile:
-- **F2** — iki panelli (YEREL ↔ UZAK), fareyle sürükle-bırak SFTP dosya transferi,
+- **F2** — iki panelli (YEREL ↔ UZAK) SFTP dosya transferi: `t` ile ya da
+  fareyle sürükle-bırak,
 - **F1** — PuTTY / Windows Terminal benzeri, tam ekran interaktif SSH terminali,
 - **F4** — seçili dosyayı [`fresh`](https://github.com/sinelaw/fresh) editöründe aç
   (uzak dosya: indir → düzenle → otomatik geri yükle),
@@ -202,11 +203,15 @@ cargo install --locked fresh-editor   # kaynaktan
 
 ## Kullanım
 
+- **`t`** (ya da **F5**): Odaklı paneldeki seçili dosyayı **karşı panele** aktarır
+  — karşı panelin o anki dizinine, aynı adla. (YEREL odaklıysa upload, UZAK
+  odaklıysa download.) Fare kullanmadan transfer.
 - **Sürükle-bırak**: Bir dosyayı bir panelden diğerine fareyle sürükleyip bırak
   → yükleme/indirme başlar. (YEREL→UZAK = upload, UZAK→YEREL = download.)
 - **Tek tık**: dosya seçer; klasöre tıklamak içine girer.
 - **Tekerlek**: seçimi kaydırır.
-- **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin, `↑/↓` gezin, `q` çıkış.
+- **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin, `↑/↓` gezin,
+  `t` transfer, `e` düzenle, `q` çıkış.
 - **F1**: SSH terminaline geç · **F2**: dosya moduna dön. Üst çubuktaki
   `F1 Terminal` / `F2 Dosya` sekmelerine **fareyle de tıklanabilir**.
 - **F4** (ya da **`e`**): seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).

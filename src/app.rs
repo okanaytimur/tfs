@@ -137,7 +137,7 @@ impl App {
             remote: Panel::new(),
             focus: PanelId::Local,
             drag: None,
-            status: "Sürükle-bırak: transfer · F4/e: fresh ile düzenle · q: çıkış".into(),
+            status: "t/F5: transfer · F4/e: fresh ile düzenle · sürükle-bırak da olur · q: çıkış".into(),
             should_quit: false,
             pending_transfer: None,
             transfer: None,
@@ -224,43 +224,52 @@ impl App {
         Ok(())
     }
 
-    // --- Transfer (drag-drop sonucu) ---
+    // --- Transfer ---
 
-    /// Sürükle-bırak sonucu bir transfer *isteği* oluşturur. Gerçek I/O ana
-    /// döngüde ayrı bir task'te yapılır (bkz. `main::run_transfer`), böylece UI
-    /// bloklanmaz ve progress bar canlı kalır.
-    fn request_transfer(&mut self, drag: &Drag, target: PanelId) {
-        if drag.entry.is_dir {
+    /// Bir transfer *isteği* kuyruklar. Gerçek I/O ana döngüde ayrı bir task'te
+    /// yapılır (bkz. `main::run_transfer`), böylece UI bloklanmaz ve progress
+    /// bar canlı kalır.
+    ///
+    /// Hedef yol daima **karşı panelin o anki dizini** + aynı dosya adıdır.
+    fn queue_transfer(&mut self, source: PanelId, entry: &Entry, target: PanelId) {
+        if entry.is_dir {
             self.status = "Klasör transferi henüz desteklenmiyor (skeleton).".into();
             return;
         }
-        match (drag.source, target) {
-            (PanelId::Local, PanelId::Remote) => {
-                let local_path = PathBuf::from(&self.local.cwd).join(&drag.entry.name);
-                let remote_path = ssh::remote_join(&self.remote.cwd, &drag.entry.name);
-                self.pending_transfer = Some(TransferRequest {
-                    source: PanelId::Local,
-                    target: PanelId::Remote,
-                    name: drag.entry.name.clone(),
-                    local_path,
-                    remote_path,
-                });
-            }
-            (PanelId::Remote, PanelId::Local) => {
-                let remote_path = ssh::remote_join(&self.remote.cwd, &drag.entry.name);
-                let local_path = PathBuf::from(&self.local.cwd).join(&drag.entry.name);
-                self.pending_transfer = Some(TransferRequest {
-                    source: PanelId::Remote,
-                    target: PanelId::Local,
-                    name: drag.entry.name.clone(),
-                    local_path,
-                    remote_path,
-                });
-            }
-            _ => {
-                self.status = "Aynı panele bırakıldı — işlem yok.".into();
-            }
+        if source == target {
+            self.status = "Kaynak ve hedef aynı panel — işlem yok.".into();
+            return;
         }
+        let local_path = PathBuf::from(&self.local.cwd).join(&entry.name);
+        let remote_path = ssh::remote_join(&self.remote.cwd, &entry.name);
+        self.pending_transfer = Some(TransferRequest {
+            source,
+            target,
+            name: entry.name.clone(),
+            local_path,
+            remote_path,
+        });
+    }
+
+    /// Sürükle-bırak sonucu transfer.
+    fn request_transfer(&mut self, drag: &Drag, target: PanelId) {
+        self.queue_transfer(drag.source, &drag.entry, target);
+    }
+
+    /// `t` (ya da F5): odaklı paneldeki seçili dosyayı **karşı panele** aktarır.
+    /// Fare kullanmadan transfer — sürükle-bırakla aynı işi yapar.
+    fn request_transfer_selected(&mut self) {
+        let source = self.focus;
+        let target = match source {
+            PanelId::Local => PanelId::Remote,
+            PanelId::Remote => PanelId::Local,
+        };
+        let p = self.panel_ref(source);
+        let entry = match p.entries.get(p.selected) {
+            Some(e) => e.clone(),
+            None => return,
+        };
+        self.queue_transfer(source, &entry, target);
     }
 
     /// Panelde adı verilen girdiyi seçer (varsa). Bir yenilemeden sonra
@@ -335,6 +344,8 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             // F4 (Norton/MC geleneği) ya da `e` → fresh editöründe aç.
             KeyCode::F(4) | KeyCode::Char('e') => self.request_edit(),
+            // F5 / `t` → seçili dosyayı karşı panele aktar.
+            KeyCode::F(5) | KeyCode::Char('t') => self.request_transfer_selected(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     PanelId::Local => PanelId::Remote,

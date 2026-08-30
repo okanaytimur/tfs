@@ -324,6 +324,12 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 - [x] 🐞 `temp_file_for` aynı milisaniyede çakışıyordu (pid+ms yetmiyor) →
       dizin artık münhasıran açılıyor (`create_dir` + sayaç), test eklendi.
 
+### Aşama 7 — klavyeyle transfer (2026-08-30)
+- [x] **`t` / F5** → odaklı paneldeki seçili dosyayı karşı panele aktar.
+      `App::request_transfer_selected`; sürükle-bırakla ortak `queue_transfer`
+      (eski `request_transfer` artık onun ince bir sarmalayıcısı).
+- [ ] Elle doğrula (her iki yön).
+
 ## 5.1 Sürüm uyumu — ÇÖZÜLDÜ (önemli not)
 `tui-term 0.3.x` → `vt100 0.16.2` → `unicode-width ^0.2.1` ister; bu, `ratatui
 0.29`'un `unicode-width =0.2.0` sabitiyle **çakışır**. Çözüm: `tui-term = "=0.2.0"`
