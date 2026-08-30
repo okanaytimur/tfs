@@ -339,13 +339,13 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
       tutuyor (dosya bitiminde beklenen boyuta sabitleniyor).
 - [x] `ui.rs`: ilerleme kutusu 4 satır — başlıkta dosya sayacı, altta o anki yol.
 - [x] 7 yeni test (toplam 23), clippy temiz.
-- [ ] Elle doğrula: iç içe klasör her iki yönde; iptal; izinsiz dizin.
+- [x] Kullanıcı doğruladı: iç içe klasör her iki yönde çalışıyor (2026-08-30).
 
 ### Aşama 7 — klavyeyle transfer (2026-08-30)
 - [x] **`t` / F5** → odaklı paneldeki seçili dosyayı karşı panele aktar.
       `App::request_transfer_selected`; sürükle-bırakla ortak `queue_transfer`
       (eski `request_transfer` artık onun ince bir sarmalayıcısı).
-- [ ] Elle doğrula (her iki yön) — v0.3.0 hazırlanırken henüz denenmemişti.
+- [x] Kullanıcı doğruladı (2026-08-30).
 
 ## 5.1 Sürüm uyumu — ÇÖZÜLDÜ (önemli not)
 `tui-term 0.3.x` → `vt100 0.16.2` → `unicode-width ^0.2.1` ister; bu, `ratatui
@@ -365,18 +365,19 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> **v0.3.0 hazır ama yayınlanmadı.** Yapılacaklar "## 12"de listeli:
+> **v0.4.0 hazır ama yayınlanmadı.** Yapılacaklar "## 12"de listeli:
 >
-> 1. `git push origin main` + `git push origin v0.3.0`.
-> 2. `cargo publish --dry-run` → `cargo publish` (crates.io girişi gerekir).
-> 3. Windows makinada iki `.exe`yi derle, `gh release create v0.3.0 …`.
+> 1. `git push origin main` + `git push origin v0.4.0`.
+> 2. `gh release create v0.4.0 …` (Linux binary + notlar).
+> 3. `cargo publish --dry-run` → `cargo publish` (crates.io girişi gerekir).
+> 4. Windows makinada iki `.exe`yi derleyip `gh release upload` ile ekle.
 >
 > Sonraki iş (kod): "## 9.C" — `known_hosts` doğrulaması + publickey auth
 > (güvenlik borcu), klasör (recursive) transferi, bağlantı kopunca yeniden
 > bağlanma.
 >
-> Henüz elle denenmemiş olanlar (fırsat oldukça): `t`/F5 transfer, `vim`/`htop`
-> tam ekran, tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
+> Henüz elle denenmemiş olanlar (fırsat oldukça): `vim`/`htop` tam ekran,
+> tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
 
 ## 8. Bağlam (kod referansları)
 - Kabuk kanalı: `src/ssh.rs` — `Ssh::open_shell(cols, rows)` aynı bağlantıda
@@ -539,34 +540,41 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > `cargo publish` geri alınamaz (yalnızca `yank`). Önce `--dry-run`.
 > Sonraki sürümlerde: `Cargo.toml`'da `version` artır → aynı adımlar.
 
-### v0.3.0 (2026-08-30) — Linux'ta hazırlandı, YAYINLANMADI
+### v0.4.0 (2026-08-30) — hazır, GitHub release + crates.io bekliyor
 
-Yapıldı (bu makinada):
-- [x] Sürüm 0.3.0, `Cargo.toml` açıklaması güncellendi, `Cargo.lock` tazelendi.
-- [x] `cargo clippy --all-targets` temiz · `cargo test` 16/16 · release derlendi.
-- [x] `cargo package` doğrulandı (`config.example.json` + `src/editor.rs` pakette).
-- [x] Linux binary: `dist/tfs-v0.3.0-linux-x86_64` (5.4 MB, strip'li).
-      Gerçek asgari **glibc 2.34** (2.39 sembolleri *zayıf*, sorun değil).
-- [x] Release notları: `dist/RELEASE-v0.3.0.md`.
-- [x] Commit + `v0.3.0` etiketi.
+> ⚠️ **Neden 0.3.0 atlandı**: `v0.3.0` etiketi `9f32034`'e basıldı ve push
+> edildi, ama klasör desteği (`44250a1`) ondan **sonra** geldi. 0.3.0 hiçbir
+> yere yayınlanmadığı (crates.io'da en son 0.2.0) ve itilmiş etiketi taşımak
+> istemediğimiz için sürüm 0.4.0'a çıkarıldı. `v0.3.0` release'siz bir ara
+> durak olarak kalıyor.
 
-Kalan (bu makinada yapılamaz — `gh` yok, git/crates.io kimliği yok):
+Yapıldı:
+- [x] Sürüm 0.4.0. `exclude = ["PLAN.md"]` — bu dosya 33 KB'lık iç çalışma notu,
+      crates.io paketinin ~yarısıydı ve kullanıcıya hitap etmiyordu (80K → 67K).
+- [x] `cargo clippy --all-targets` temiz · `cargo test` 23/23 · release derlendi.
+- [x] `cargo package` doğrulandı (`config.example.json` pakette, PLAN.md yok).
+- [x] `dist/tfs-v0.4.0-linux-x86_64` (5.5 MB, strip'li) — asgari **glibc 2.34**
+      (objdump'taki GLIBC_2.39 sembolleri *zayıf*, sorun değil).
+- [x] `dist/RELEASE-v0.4.0.md` — 0.2.0'dan bu yana her şey.
+- [x] Commit + `v0.4.0` etiketi.
+- [x] Depo yapısı denetlendi: 16 takip edilen dosya, geçmişte `config.json` /
+      anahtar / parola sızıntısı **yok**.
+
+Kalan (bu makinada `gh` yok, git/crates.io kimliği yok):
 ```sh
-git push origin main && git push origin v0.3.0
-cargo publish --dry-run && cargo publish       # crates.io girişi gerekir
+git push origin main && git push origin v0.4.0
+gh release create v0.4.0 dist/tfs-v0.4.0-linux-x86_64 \
+  --title "v0.4.0 — fresh editörü, klasör transferi, Linux sürümü" \
+  --notes-file dist/RELEASE-v0.4.0.md
+cargo publish --dry-run && cargo publish
 ```
-Windows binary'leri **Windows makinada** derlenmeli (msvc hedefi):
+Windows binary'leri **Windows makinada** derlenmeli, sonra release'e eklenmeli:
 ```powershell
 cargo build --release                                  # x86_64
 cargo build --release --target i686-pc-windows-msvc    # i686
 ```
-Sonra release:
 ```sh
-gh release create v0.3.0 \
-  dist/tfs-v0.3.0-linux-x86_64 \
-  dist/tfs-v0.3.0-windows-x86_64.exe \
-  dist/tfs-v0.3.0-windows-i686.exe \
-  --notes-file dist/RELEASE-v0.3.0.md
+gh release upload v0.4.0 dist/tfs-v0.4.0-windows-x86_64.exe dist/tfs-v0.4.0-windows-i686.exe
 ```
 
 ### İsteğe bağlı — musl statik Linux binary'si

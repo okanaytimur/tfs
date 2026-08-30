@@ -1,6 +1,6 @@
 [package]
 name = "tfs-ssh"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "tfs — fare öncelikli SSH dosya tarayıcısı (F2) + modern SSH terminali (F1) + F4 ile uzak dosyayı fresh editöründe düzenleme. Tek bağlantı, tek araç."
 authors = ["Okan Aytimur"]
@@ -9,6 +9,9 @@ repository = "https://github.com/okanaytimur/tfs"
 readme = "README.md"
 keywords = ["ssh", "sftp", "terminal", "tui", "file-transfer"]
 categories = ["command-line-utilities", "network-programming"]
+# PLAN.md oturumlar arası iç çalışma notu (33 KB) — depoda kalsın ama crates.io
+# paketine girmesin; paketin neredeyse yarısıydı ve kullanıcıya hitap etmiyor.
+exclude = ["PLAN.md"]
 
 # crates.io paket adı `tfs-ssh` (`tfs` alınmış), ama kurulan komut `tfs`.
 [[bin]]
