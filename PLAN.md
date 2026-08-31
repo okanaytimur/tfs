@@ -4,7 +4,7 @@
 > bunu oku; "Durum" bölümündeki kutucuklardan (`[ ]` / `[x]`) nerede kaldığımızı
 > gör ve "Sıradaki adım"dan devam et.
 
-Son güncelleme: 2026-08-30
+Son güncelleme: 2026-08-31
 
 > **DURUM: Aşama 0–4 + bug düzeltmeleri tamam, çalışır durumda (clippy temiz).**
 > F1 SSH terminali + F2 dosya transferi entegre edildi.
@@ -365,12 +365,14 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> **v0.4.0 hazır ama yayınlanmadı.** Yapılacaklar "## 12"de listeli:
+> **v0.4.0 GitHub'da yayında** (2026-08-31): push + release tamam, Linux binary
+> asset olarak yüklü. Kalanlar "## 12"de:
 >
-> 1. `git push origin main` + `git push origin v0.4.0`.
-> 2. `gh release create v0.4.0 …` (Linux binary + notlar).
-> 3. `cargo publish --dry-run` → `cargo publish` (crates.io girişi gerekir).
-> 4. Windows makinada iki `.exe`yi derleyip `gh release upload` ile ekle.
+> 1. ~~`git push origin main` + `git push origin v0.4.0`~~ ✅
+> 2. ~~`gh release create v0.4.0 …`~~ ✅
+> 3. [ ] `cargo login` → `cargo publish --dry-run` → `cargo publish`
+>        (crates.io'da hâlâ 0.2.0 duruyor; bu makinada token yok).
+> 4. [ ] Windows makinada iki `.exe`yi derleyip `gh release upload` ile ekle.
 >
 > Sonraki iş (kod): "## 9.C" — `known_hosts` doğrulaması + publickey auth
 > (güvenlik borcu), klasör (recursive) transferi, bağlantı kopunca yeniden
@@ -560,12 +562,25 @@ Yapıldı:
 - [x] Depo yapısı denetlendi: 16 takip edilen dosya, geçmişte `config.json` /
       anahtar / parola sızıntısı **yok**.
 
-Kalan (bu makinada `gh` yok, git/crates.io kimliği yok):
+Yayınlandı (2026-08-31, `gh` 2.97.0 kuruldu):
+- [x] `git push origin main` + `git push origin v0.4.0` → `01dc454` ve `v0.4.0`
+      etiketi origin'de.
+- [x] GitHub Release: https://github.com/okanaytimur/tfs/releases/tag/v0.4.0
+      (asset: `tfs-v0.4.0-linux-x86_64`, 5.697.192 bayt; notlar
+      `dist/RELEASE-v0.4.0.md`'den).
+
+- [x] Windows binary'leri Windows makinada derlenip release'e yüklendi
+      (`tfs-v0.4.0-windows-x86_64.exe` 5.264.896 B ·
+      `tfs-v0.4.0-windows-i686.exe` 4.297.216 B).
+- [x] `cargo update -p chacha20` (0.10.1 **yanked** → 0.10.2). russh'un dolaylı
+      bağımlılığı; `cargo publish` uyarı veriyordu. 23/23 test geçti. Bu yüzden
+      yayınlanan crate'in Cargo.lock'u `v0.4.0` etiketinden bir commit ileride —
+      release binary'leri etiketten derlendiği için etkilenmedi.
+
+Kalan:
+- [ ] **crates.io** — bu makinada token yok (`~/.cargo/credentials.toml` yok).
+      `cargo login` sonrası:
 ```sh
-git push origin main && git push origin v0.4.0
-gh release create v0.4.0 dist/tfs-v0.4.0-linux-x86_64 \
-  --title "v0.4.0 — fresh editörü, klasör transferi, Linux sürümü" \
-  --notes-file dist/RELEASE-v0.4.0.md
 cargo publish --dry-run && cargo publish
 ```
 Windows binary'leri **Windows makinada** derlenmeli, sonra release'e eklenmeli:
