@@ -541,8 +541,23 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 
 > `cargo publish` geri alınamaz (yalnızca `yank`). Önce `--dry-run`.
 > Sonraki sürümlerde: `Cargo.toml`'da `version` artır → aynı adımlar.
+>
+> **Yayın sonrası doğrulama** (kimlik gerektirmez, herkesin makinasında çalışır):
+> ```sh
+> # crates.io: hangi sürüm, yanked mı, hangi commit'ten
+> curl -s https://crates.io/api/v1/crates/tfs-ssh | python3 -m json.tool | head -30
+> curl -sL https://static.crates.io/crates/tfs-ssh/tfs-ssh-X.Y.Z.crate -o /tmp/p.crate
+> tar xzOf /tmp/p.crate tfs-ssh-X.Y.Z/.cargo_vcs_info.json
+> # GitHub release + asset'ler
+> curl -s https://api.github.com/repos/okanaytimur/tfs/releases/tags/vX.Y.Z
+> # binstall URL'leri gerçekten var mı (yapılandırma "doğru görünmek" yetmez)
+> curl -sIL -o /dev/null -w '%{http_code}\n' \
+>   https://github.com/okanaytimur/tfs/releases/download/vX.Y.Z/tfs-vX.Y.Z-linux-x86_64
+> # etiket ile yayınlanan commit aynı mı
+> git ls-remote --tags origin | grep 'vX.Y.Z'
+> ```
 
-### v0.4.0 (2026-08-30) — hazır, GitHub release + crates.io bekliyor
+### v0.4.0 — YAYINDA (GitHub release + crates.io, 2026-08-31)
 
 > ⚠️ **Neden 0.3.0 atlandı**: `v0.3.0` etiketi `9f32034`'e basıldı ve push
 > edildi, ama klasör desteği (`44250a1`) ondan **sonra** geldi. 0.3.0 hiçbir
@@ -585,14 +600,26 @@ Yayınlandı (2026-08-31, `gh` 2.97.0 kuruldu):
       yazıldı; mevcut asset adları korundu, üç URL de 200 döndü. README'ye
       `cargo binstall` satırı eklendi.
 
-Kalan:
-- [ ] **crates.io** — Linux makinasında token yok; yayın Windows makinasından
-      yapılıyor (`cargo login` orada tamam). Not: `--dry-run` yayın değildir —
-      2026-08-31'de sadece o çalıştırıldığı için 0.4.0 crates.io'ya çıkmamıştı.
-      `cargo login` sonrası:
-```sh
-cargo publish --dry-run && cargo publish
-```
+- [x] **crates.io: `tfs-ssh 0.4.0` yayında** (2026-08-31 11:04:36 UTC, Windows
+      makinasından). Yanked değil. Yayınlanan paketin `.cargo_vcs_info.json`'u
+      `64a5269` diyor — yani chacha20 düzeltmesi ve binstall metadatası dahil.
+      (Not: `--dry-run` yayın değildir; bir tur sadece o çalıştırıldığı için
+      0.4.0 bir süre crates.io'da görünmedi.)
+- [x] **Etiket düzeltildi** (2026-08-31): `v0.4.0` `01dc454`'i gösteriyordu ama
+      crates.io'ya `64a5269` yayınlanmıştı — etiketten derleyen biri farklı
+      kaynak alırdı. Etiket `64a5269`'a taşındı ve force-push edildi
+      (`git tag -f -a v0.4.0 64a5269` + `git push --force origin v0.4.0`).
+      GitHub release ve asset'leri etkilenmedi (indirme sayaçları korundu).
+
+> 📌 **Ders — sonraki sürümlerde etiketi EN SON bas.** İki kez üst üste aynı şey
+> oldu (v0.3.0 ve v0.4.0): etiket basıldı, sonra commit'ler geldi, etiket geride
+> kaldı. Doğru sıra:
+> 1. Tüm değişiklikleri commit'le (`Cargo.lock` yanked düzeltmeleri,
+>    `metadata.binstall` gibi meta işleri dahil).
+> 2. `cargo publish --dry-run` → sorun varsa düzelt, **tekrar commit'le**.
+> 3. **Şimdi** etiketle: `git tag -a vX.Y.Z`.
+> 4. `git push origin main && git push origin vX.Y.Z`.
+> 5. `cargo publish` + `gh release create` — ikisi de etiketli commit'ten.
 Windows binary'leri **Windows makinada** derlenmeli, sonra release'e eklenmeli:
 ```powershell
 cargo build --release                                  # x86_64
