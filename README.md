@@ -17,6 +17,13 @@ hepsi tek SSH bağlantısı üzerinden (yeniden bağlanma yok).
 cargo install tfs-ssh
 ```
 
+Kaynaktan derlemek istemiyorsanız [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall)
+hazır binary'yi Releases'ten indirir (saniyeler sürer):
+
+```sh
+cargo binstall tfs-ssh
+```
+
 > crates.io'da `tfs` adı başkasına ait olduğu için paket adı **`tfs-ssh`**;
 > kurulan komut yine **`tfs`**'tir.
 

@@ -13,6 +13,26 @@ categories = ["command-line-utilities", "network-programming"]
 # paketine girmesin; paketin neredeyse yarısıydı ve kullanıcıya hitap etmiyor.
 exclude = ["PLAN.md"]
 
+# `cargo binstall tfs-ssh` — derlemeden, GitHub Releases'ten hazır binary indirir.
+# Bu bölüm crates.io'ya yüklenen sürümden okunur, GitHub'daki Cargo.toml'dan
+# DEĞİL: yayınlanmış bir sürüme sonradan eklenemez, yeni sürüm gerekir.
+# binstall'ın varsayılan isim kalıpları Rust hedef üçlüsü bekler
+# (`tfs-ssh-x86_64-pc-windows-msvc-v0.4.0.exe`); bizim asset adlarımız farklı,
+# o yüzden hedef başına açıkça yazılıyor. Yeni sürümde asset adlarını aynı
+# kalıpta tut (`tfs-v<sürüm>-<platform>`), burası kendiliğinden uyar.
+[package.metadata.binstall]
+pkg-fmt = "bin"                  # arşiv değil, çıplak binary
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/tfs-v{ version }-windows-x86_64.exe"
+
+[package.metadata.binstall.overrides.i686-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/tfs-v{ version }-windows-i686.exe"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/tfs-v{ version }-linux-x86_64"
+
 # crates.io paket adı `tfs-ssh` (`tfs` alınmış), ama kurulan komut `tfs`.
 [[bin]]
 name = "tfs"

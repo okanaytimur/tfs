@@ -577,8 +577,18 @@ Yayınlandı (2026-08-31, `gh` 2.97.0 kuruldu):
       yayınlanan crate'in Cargo.lock'u `v0.4.0` etiketinden bir commit ileride —
       release binary'leri etiketten derlendiği için etkilenmedi.
 
+- [x] `[package.metadata.binstall]` eklendi → `cargo binstall tfs-ssh` hazır
+      binary indirir. **Bu bölüm crates.io'ya yüklenen sürümden okunur**, GitHub
+      deposundakinden değil — yayınlanmış bir sürüme sonradan eklenemez, o yüzden
+      yayından ÖNCE girdi. Varsayılan kalıplar Rust hedef üçlüsü beklediği için
+      (`tfs-ssh-x86_64-pc-windows-msvc-v0.4.0.exe`) hedef başına `overrides`
+      yazıldı; mevcut asset adları korundu, üç URL de 200 döndü. README'ye
+      `cargo binstall` satırı eklendi.
+
 Kalan:
-- [ ] **crates.io** — bu makinada token yok (`~/.cargo/credentials.toml` yok).
+- [ ] **crates.io** — Linux makinasında token yok; yayın Windows makinasından
+      yapılıyor (`cargo login` orada tamam). Not: `--dry-run` yayın değildir —
+      2026-08-31'de sadece o çalıştırıldığı için 0.4.0 crates.io'ya çıkmamıştı.
       `cargo login` sonrası:
 ```sh
 cargo publish --dry-run && cargo publish
