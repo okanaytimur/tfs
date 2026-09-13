@@ -324,6 +324,27 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 - [x] 🐞 `temp_file_for` aynı milisaniyede çakışıyordu (pid+ms yetmiyor) →
       dizin artık münhasıran açılıyor (`create_dir` + sayaç), test eklendi.
 
+### Aşama 9 — panelde arama/filtreleme (2026-08-31)
+- [x] `Panel` artık `entries` (tamamı) + `view` (sorguya uyan indeksler) +
+      `query` tutuyor. **Seçim, kaydırma ve fare isabet testi `view` üzerinden** —
+      gizli bir girdi yanlışlıkla seçilemez (test: `fare_isabeti_gorunen_listeye_gore`).
+- [x] Yazılabilir her karakter sorguya gidiyor → eski tek harfli kısayollar
+      (`q`/`t`/`e`) **kaldırıldı**; yerine `Ctrl+Q`/`F10`/`Esc` (çıkış),
+      `F5` (transfer), `F4` (düzenle).
+- [x] `Backspace`: sorgu varsa harf siler, yoksa üst dizin. `Esc`: sorgu varsa
+      temizler, yoksa çıkar. `go_parent` eklendi (eskiden `enter(idx=0)` ile
+      yapılıyordu — filtre açıkken 0. görünür girdi `..` olmayabilir).
+- [x] `refilter` seçimi **girdi kimliğine göre** koruyor: harf silerken imleç
+      aynı dosyada kalıyor (test: `harf_silince_secim_korunur`).
+- [x] `Home/End/PgUp/PgDn` eklendi.
+- [x] `ui.rs`: başlıkta `ara: idx (3/412)`, altta `(409 girdi gizlendi)`,
+      eşleşme yoksa "eşleşme yok — Esc: aramayı temizle".
+- [x] Eşleşme: alt dizge, büyük/küçük harf duyarsız (`to_lowercase`).
+      Türkçe notu: `I` → `i` (Unicode kuralı), `ı` değil — ASCII adlarda doğru.
+- [x] 8 yeni test (toplam 31), clippy temiz.
+- [ ] Elle doğrula: iki panelde ayrı sorgu, filtreliyken transfer/düzenleme,
+      `Esc` iki kademesi.
+
 ### Aşama 8 — klasör (recursive) transferi (2026-08-30)
 - [x] `ssh.rs`: `walk_local` / `Ssh::walk_remote` (genişlik-öncelikli; **dizin
       daima içeriğinden önce** listeye girer — hedefte dizinler içerik gelmeden

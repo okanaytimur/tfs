@@ -597,7 +597,7 @@ pub fn draw_top_bar(
         spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     } else {
         spans.push(Span::styled(
-            "  — t: transfer · F4: fresh ile düzenle · sürükle-bırak da olur · q: çıkış",
+            "  — yaz: ara · F5: transfer · F4: düzenle · Esc: temizle/çık",
             Style::default().fg(Color::DarkGray),
         ));
     }

@@ -132,46 +132,97 @@ fn draw_panel(f: &mut Frame, area: Rect, panel: &mut Panel, focused: bool, tag: 
         Style::default().fg(Color::DarkGray)
     };
 
-    let title = format!(" {tag}: {} ", panel.cwd);
+    // Arama açıkken başlık sorguyu ve kaç sonuç kaldığını söyler.
+    let title = if panel.query.is_empty() {
+        format!(" {tag}: {} ", panel.cwd)
+    } else {
+        format!(
+            " {tag}: {} — ara: {} ({}/{}) ",
+            panel.cwd,
+            panel.query,
+            panel.view.len(),
+            panel.entries.len()
+        )
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
         .title(title);
 
     let inner = block.inner(area);
-    panel.list_area = inner; // fare isabet testi için kaydet
+    f.render_widget(block, area);
 
-    let items: Vec<ListItem> = panel
-        .entries
-        .iter()
-        .map(|e| {
-            let (icon, style) = if e.is_dir {
-                ("📁 ", Style::default().fg(Color::LightBlue))
-            } else {
-                ("📄 ", Style::default().fg(Color::White))
-            };
-            ListItem::new(Line::from(vec![
-                Span::raw(icon),
-                Span::styled(e.name.clone(), style),
-            ]))
-        })
-        .collect();
+    // Filtre varken son satırı "gizlendi" bilgisine ayır — ama panel zaten
+    // iki satırdan kısaysa listeye öncelik ver.
+    let gizli = panel.entries.len().saturating_sub(panel.view.len());
+    let alt_satir = !panel.query.is_empty() && inner.height >= 2;
+    let (list_area, footer) = if alt_satir {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(inner);
+        (rows[0], Some(rows[1]))
+    } else {
+        (inner, None)
+    };
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
+    panel.list_area = list_area; // fare isabet testi için kaydet
 
-    let mut state = ListState::default();
-    state.select(Some(panel.selected));
-    *state.offset_mut() = panel.offset;
+    if panel.view.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                if panel.query.is_empty() {
+                    "  (boş dizin)"
+                } else {
+                    "  eşleşme yok — Esc: aramayı temizle"
+                },
+                Style::default().fg(Color::DarkGray),
+            ))),
+            list_area,
+        );
+    } else {
+        let items: Vec<ListItem> = panel
+            .visible()
+            .map(|e| {
+                let (icon, style) = if e.is_dir {
+                    ("📁 ", Style::default().fg(Color::LightBlue))
+                } else {
+                    ("📄 ", Style::default().fg(Color::White))
+                };
+                ListItem::new(Line::from(vec![
+                    Span::raw(icon),
+                    Span::styled(e.name.clone(), style),
+                ]))
+            })
+            .collect();
 
-    f.render_stateful_widget(list, area, &mut state);
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Blue)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+
+        let mut state = ListState::default();
+        state.select(Some(panel.selected));
+        *state.offset_mut() = panel.offset;
+
+        f.render_stateful_widget(list, list_area, &mut state);
+    }
+
+    if let Some(footer) = footer {
+        if gizli > 0 {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!("  ({gizli} girdi gizlendi)"),
+                    Style::default().fg(Color::DarkGray),
+                ))),
+                footer,
+            );
+        }
+    }
 }
 
 /// Ekranın ortasında, verilen genişlik (yüzde) ve yükseklikte (satır) bir dikdörtgen.

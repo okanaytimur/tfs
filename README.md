@@ -217,23 +217,61 @@ cargo install --locked fresh-editor   # kaynaktan
 
 ## Kullanım
 
-- **`t`** (ya da **F5**): Odaklı paneldeki seçili **dosya ya da klasörü** karşı
+- **F5**: Odaklı paneldeki seçili **dosya ya da klasörü** karşı
   panele aktarır — karşı panelin o anki dizinine, aynı adla. (YEREL odaklıysa
   upload, UZAK odaklıysa download.) Fare kullanmadan transfer.
 - **Sürükle-bırak**: Bir dosyayı/klasörü bir panelden diğerine fareyle sürükleyip
   bırak → yükleme/indirme başlar. (YEREL→UZAK = upload, UZAK→YEREL = download.)
 - **Tek tık**: dosya seçer; klasöre tıklamak içine girer.
 - **Tekerlek**: seçimi kaydırır.
-- **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin, `↑/↓` gezin,
-  `t` transfer, `e` düzenle, `q` çıkış.
+- **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin,
+  `↑/↓` `PgUp/PgDn` `Home/End` gezin, `F5` transfer, `F4` düzenle,
+  `Esc`/`F10`/`Ctrl+Q` çıkış. **Yazmaya başlamak arama yapar** (aşağıya bakın).
 - **F1**: SSH terminaline geç · **F2**: dosya moduna dön. Üst çubuktaki
   `F1 Terminal` / `F2 Dosya` sekmelerine **fareyle de tıklanabilir**.
-- **F4** (ya da **`e`**): seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).
+- **F4**: seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).
 
 ## Sunucu seçme ekranı
 
 - Açılışta `config.json`'daki sunucular listelenir.
 - **Tek tık** ilgili sunucuya bağlanır; `↑/↓` + `Enter` de çalışır; `q` çıkar.
+
+## Arama — yazmaya başlayın
+
+Aktif panelde **yazmaya başladığınız an** liste filtrelenir; eşleşmeyen girdiler
+gizlenir. Ayrı bir "arama moduna" girmeniz gerekmez.
+
+```
+┌ UZAK: /var/www — ara: index (3/412) ──┐
+│ ▶ 📄 index.html                       │
+│   📄 index.php                        │
+│   📄 INDEX.md                         │
+│                                       │
+│   (409 girdi gizlendi)                │
+└───────────────────────────────────────┘
+```
+
+| Tuş | Ne yapar |
+|-----|----------|
+| yazılabilir karakter | sorguya ekler, liste anında filtrelenir |
+| `Backspace` | sorgu varsa son harfi siler · sorgu yoksa **üst dizine** çıkar |
+| `Esc` | sorgu varsa temizler · sorgu yoksa **çıkar** |
+| `Enter` | seçili klasöre girer (ve sorguyu temizler) |
+| `↑/↓`, `PgUp/PgDn`, `Home/End` | filtrelenmiş liste içinde gezinir |
+
+- Arama **büyük/küçük harf duyarsızdır** ve alt dizge eşleşmesi yapar
+  (`index` → `index.html`, `INDEX.md`).
+- Her panelin **kendi sorgusu** vardır; `Tab` ile geçtiğinizde diğerinin
+  filtresi bozulmaz.
+- Dizin değiştirince sorgu temizlenir.
+- Harf sildikçe **imleç seçili dosyanın üstünde kalır** — liste büyürken seçim
+  zıplamaz.
+- Filtre açıkken seçim, transfer ve düzenleme daima **görünen** listeye göre
+  çalışır; gizli bir dosya yanlışlıkla seçilemez.
+
+> **Not**: Arama yazılabilir tüm harfleri kullandığı için eski tek harfli
+> kısayollar (`q`, `t`, `e`) kaldırıldı. Yerlerine `Ctrl+Q`/`F10`/`Esc` (çıkış),
+> `F5` (transfer) ve `F4` (düzenle) geçti — Norton/Midnight Commander geleneği.
 
 ## Klasör transferi
 
