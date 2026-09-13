@@ -145,3 +145,155 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height: h,
     }
 }
+
+/// Sunucu anahtarı sorununu gösterir. Dönüş: kullanıcı **kabul edip yeniden
+/// denemek** istiyor mu?
+///
+/// Yalnızca `Unknown` (ilk bağlantı) kabul edilebilir. `Changed` ortadaki-adam
+/// saldırısının imzasıdır — burada bir "kabul et" yolu bilerek **yoktur**;
+/// kullanıcı `known_hosts`u elle düzeltmeli, yoksa tek tuşla korumayı iptal
+/// etmiş oluruz.
+pub async fn confirm_host_key(
+    term: &mut Term,
+    sc: &ServerConfig,
+    issue: &crate::ssh::HostKeyIssue,
+) -> Result<bool> {
+    use crate::ssh::HostKeyIssue;
+
+    let kabul_edilebilir = matches!(issue, HostKeyIssue::Unknown { .. });
+    let mut events = EventStream::new();
+
+    loop {
+        term.draw(|f| draw_host_key(f, sc, issue))?;
+
+        match events.next().await {
+            Some(Ok(Event::Key(k))) if k.kind == KeyEventKind::Press => match k.code {
+                KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Enter if kabul_edilebilir => {
+                    return Ok(true)
+                }
+                KeyCode::Char('h')
+                | KeyCode::Char('H')
+                | KeyCode::Char('q')
+                | KeyCode::Enter
+                | KeyCode::Esc => return Ok(false),
+                _ => {}
+            },
+            Some(Ok(_)) => {}
+            Some(Err(e)) => return Err(e.into()),
+            None => return Ok(false),
+        }
+    }
+}
+
+fn draw_host_key(f: &mut Frame, sc: &ServerConfig, issue: &crate::ssh::HostKeyIssue) {
+    use crate::ssh::HostKeyIssue;
+
+    let kirmizi = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+    let sari = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let sonuk = Style::default().fg(Color::DarkGray);
+
+    let (baslik, kenar, mut satirlar) = match issue {
+        HostKeyIssue::Unknown { algorithm, .. } => (
+            " Bilinmeyen sunucu anahtarı ",
+            sari,
+            vec![
+                Line::from(vec![
+                    Span::raw("'"),
+                    Span::styled(sc.name.clone(), sari),
+                    Span::raw(format!("' ({}:{}) ilk kez bağlanıyorsunuz.", sc.host, sc.port)),
+                ]),
+                Line::from(""),
+                Line::from(format!("  Anahtar türü : {algorithm}")),
+                Line::from(format!("  Parmak izi   : {}", issue.fingerprint())),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Bu parmak izini sunucudan bağımsız bir yolla doğrulayın:",
+                    sonuk,
+                )),
+                Line::from(Span::styled(
+                    "  ssh-keyscan -p PORT HOST | ssh-keygen -lf -",
+                    Style::default().fg(Color::LightCyan),
+                )),
+                Line::from(""),
+                Line::from("Kabul ederseniz ~/.ssh/known_hosts dosyasına eklenir."),
+            ],
+        ),
+        HostKeyIssue::Changed { line, .. } => (
+            " ⚠ SUNUCU ANAHTARI DEĞİŞTİ ",
+            kirmizi,
+            vec![
+                Line::from(Span::styled(
+                    "Bu sunucunun anahtarı daha önce kaydettiğinizden FARKLI.",
+                    kirmizi,
+                )),
+                Line::from(""),
+                Line::from(format!("  {}:{}", sc.host, sc.port)),
+                Line::from(format!("  Yeni parmak izi : {}", issue.fingerprint())),
+                Line::from(format!("  known_hosts satırı : {line}")),
+                Line::from(""),
+                Line::from("Sunucu yeniden kurulduysa bu normaldir. Değilse"),
+                Line::from(Span::styled(
+                    "trafiğiniz araya giren biri tarafından dinleniyor olabilir.",
+                    kirmizi,
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Emin olmadan devam etmeyin. Eminseniz ilgili satırı silin:",
+                    sonuk,
+                )),
+                Line::from(Span::styled(
+                    format!("  ssh-keygen -R '[{}]:{}'", sc.host, sc.port),
+                    Style::default().fg(Color::LightCyan),
+                )),
+            ],
+        ),
+        HostKeyIssue::Unreadable(e) => (
+            " known_hosts okunamadı ",
+            kirmizi,
+            vec![
+                Line::from("Sunucu anahtarı doğrulanamadı:"),
+                Line::from(""),
+                Line::from(Span::styled(format!("  {e}"), kirmizi)),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "~/.ssh/known_hosts dosyasının izinlerini kontrol edin.",
+                    sonuk,
+                )),
+            ],
+        ),
+    };
+
+    satirlar.push(Line::from(""));
+    satirlar.push(if matches!(issue, HostKeyIssue::Unknown { .. }) {
+        Line::from(vec![
+            Span::styled(
+                " E / Enter ",
+                Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" kabul et ve bağlan    "),
+            Span::styled(
+                " H / Esc ",
+                Style::default().fg(Color::Black).bg(Color::Gray).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" vazgeç"),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                " Esc ",
+                Style::default().fg(Color::Black).bg(Color::Gray).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" kapat"),
+        ])
+    });
+
+    let yukseklik = satirlar.len() as u16 + 2;
+    // Mevcut `centered` mutlak genişlik alır: 74 sütunluk kutu.
+    let area = centered(f.area(), 74, yukseklik);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(kenar)
+        .title(baslik);
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(Paragraph::new(satirlar).block(block), area);
+}

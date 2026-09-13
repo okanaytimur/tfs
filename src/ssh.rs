@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use russh::client::{self, Handle};
-use russh::keys::ssh_key;
+use russh::keys::{ssh_key, PrivateKeyWithHashAlg};
 use russh::Channel;
 use russh_sftp::client::SftpSession;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -161,16 +161,99 @@ impl<'a> Reporter<'a> {
 /// Chunk boyutu (64 KiB) — her chunk sonrası ilerleme bildirilir.
 const CHUNK: usize = 64 * 1024;
 
-/// Sunucu anahtarını sorgusuz kabul eden basit handler (skeleton için).
-/// Prod'da known_hosts doğrulaması eklenmeli.
-struct ClientHandler;
+/// Sunucu anahtarı doğrulamasının sonucu ortaya çıkan sorun.
+///
+/// `check_server_key` içinden kullanıcıya soru soramayız (bağlantı el sıkışması
+/// sürüyor, TUI'ye erişimimiz yok). Bu yüzden sorun buraya **kaydedilir**,
+/// doğrulama `false` döner (bağlantı düşer) ve kararı `Ssh::connect`'in
+/// çağıranı verir — bkz. `Connected`.
+#[derive(Clone, Debug)]
+pub enum HostKeyIssue {
+    /// `known_hosts`ta kayıt yok — ilk bağlantı. Kullanıcıya sorulmalı.
+    Unknown {
+        fingerprint: String,
+        algorithm: String,
+        /// Kullanıcı onaylarsa `trust_host_key`e verilecek anahtar.
+        key: Box<ssh_key::PublicKey>,
+    },
+    /// Kayıt var ama anahtar **değişmiş**. Ortadaki-adam saldırısı olabilir;
+    /// asla otomatik kabul edilmez, kullanıcı dosyayı elle düzeltmeli.
+    Changed { fingerprint: String, line: usize },
+    /// `known_hosts` okunamadı (izin, bozuk satır, ev dizini yok…).
+    Unreadable(String),
+}
+
+impl HostKeyIssue {
+    pub fn fingerprint(&self) -> &str {
+        match self {
+            Self::Unknown { fingerprint, .. } | Self::Changed { fingerprint, .. } => fingerprint,
+            Self::Unreadable(_) => "-",
+        }
+    }
+}
+
+/// `Ssh::connect` sonucu: ya oturum, ya da önce çözülmesi gereken bir anahtar
+/// sorunu. (Kimlik doğrulama hatası `Err` olarak döner — o yeniden denenebilir
+/// bir durum değil.)
+pub enum Connected {
+    Ok(Box<Ssh>),
+    HostKey(HostKeyIssue),
+}
+
+/// Sunucu anahtarını `~/.ssh/known_hosts`a göre doğrular.
+struct ClientHandler {
+    host: String,
+    port: u16,
+    /// Doğrulama başarısızsa nedeni; `connect` buradan okur.
+    issue: Arc<std::sync::Mutex<Option<HostKeyIssue>>>,
+}
 
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
+    async fn check_server_key(&mut self, key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        let issue = match russh::keys::check_known_hosts(&self.host, self.port, key) {
+            Ok(true) => return Ok(true),
+            Ok(false) => HostKeyIssue::Unknown {
+                fingerprint: key.fingerprint(ssh_key::HashAlg::Sha256).to_string(),
+                algorithm: key.algorithm().to_string(),
+                key: Box::new(key.clone()),
+            },
+            Err(russh::keys::Error::KeyChanged { line }) => HostKeyIssue::Changed {
+                fingerprint: key.fingerprint(ssh_key::HashAlg::Sha256).to_string(),
+                // Dosyadaki satır numarası 0 tabanlı geliyor; kullanıcıya
+                // gösterirken editörlerle aynı dili konuşalım.
+                line: line + 1,
+            },
+            Err(e) => HostKeyIssue::Unreadable(e.to_string()),
+        };
+        if let Ok(mut slot) = self.issue.lock() {
+            *slot = Some(issue);
+        }
+        Ok(false)
     }
+}
+
+/// Anahtarı `~/.ssh/known_hosts`a ekler (kullanıcı onayladıktan sonra).
+pub fn trust_host_key(host: &str, port: u16, key: &ssh_key::PublicKey) -> Result<()> {
+    russh::keys::known_hosts::learn_known_hosts(host, port, key)
+        .with_context(|| format!("{host}:{port} anahtarı known_hosts'a yazılamadı"))
+}
+
+/// Denenecek özel anahtarlar. `key` verilmişse yalnızca o; verilmemişse
+/// OpenSSH'in baktığı varsayılanlardan var olanlar.
+fn candidate_keys(sc: &crate::config::ServerConfig) -> Vec<std::path::PathBuf> {
+    if let Some(p) = sc.key_path() {
+        return vec![p];
+    }
+    let Some(home) = crate::config::home_dir() else {
+        return Vec::new();
+    };
+    ["id_ed25519", "id_ecdsa", "id_rsa"]
+        .iter()
+        .map(|n| home.join(".ssh").join(n))
+        .filter(|p| p.is_file())
+        .collect()
 }
 
 /// Uzak dosya sistemiyle konuşan oturum. `handle` bağlantıyı canlı tutar ve
@@ -188,19 +271,82 @@ pub struct RemoteEntry {
 }
 
 impl Ssh {
-    /// Parola ile bağlanır ve SFTP alt sistemini açar.
-    pub async fn connect(host: &str, port: u16, user: &str, pass: &str) -> Result<Self> {
-        let config = Arc::new(client::Config::default());
-        let mut handle = client::connect(config, (host, port), ClientHandler)
-            .await
-            .with_context(|| format!("{host}:{port} bağlantısı kurulamadı"))?;
+    /// Bağlanır, kimlik doğrular ve SFTP alt sistemini açar.
+    ///
+    /// **Sunucu anahtarı** `~/.ssh/known_hosts`a göre doğrulanır. Anahtar
+    /// bilinmiyorsa ya da değişmişse bağlantı kurulmaz; `Connected::HostKey`
+    /// döner ve kararı çağıran (TUI) verir.
+    ///
+    /// **Kimlik doğrulama sırası** OpenSSH'inkiyle aynı: önce publickey
+    /// (config'teki `key`, yoksa `~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa`),
+    /// sonra parola. Tümü başarısızsa hata, hangi yöntemin neden düştüğünü
+    /// listeler — "kimlik doğrulama reddedildi" tek başına teşhis ettirmiyordu.
+    pub async fn connect(sc: &crate::config::ServerConfig) -> Result<Connected> {
+        let issue = Arc::new(std::sync::Mutex::new(None));
+        let handler = ClientHandler {
+            host: sc.host.clone(),
+            port: sc.port,
+            issue: Arc::clone(&issue),
+        };
 
-        let auth = handle
-            .authenticate_password(user, pass)
-            .await
-            .context("kimlik doğrulama isteği başarısız")?;
-        if !auth.success() {
-            bail!("kimlik doğrulama reddedildi (kullanıcı/parola)");
+        let config = Arc::new(client::Config::default());
+        let connected = client::connect(config, (sc.host.as_str(), sc.port), handler).await;
+
+        let mut handle = match connected {
+            Ok(h) => h,
+            Err(e) => {
+                // Bağlantı, anahtar doğrulaması `false` döndüğü için de
+                // başarısız olur; o durumda gerçek neden slottadır.
+                if let Some(issue) = issue.lock().ok().and_then(|mut s| s.take()) {
+                    return Ok(Connected::HostKey(issue));
+                }
+                return Err(anyhow::Error::new(e))
+                    .with_context(|| format!("{}:{} bağlantısı kurulamadı", sc.host, sc.port));
+            }
+        };
+
+        // --- Kimlik doğrulama ---
+        let mut notes: Vec<String> = Vec::new();
+
+        // RSA anahtarları için sunucunun desteklediği en iyi imza karması
+        // (SHA-1 artık çoğu sunucuda kapalı).
+        let rsa_hash = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
+
+        let mut authed = false;
+        for path in candidate_keys(sc) {
+            match russh::keys::load_secret_key(&path, sc.key_passphrase.as_deref()) {
+                Ok(key) => {
+                    let with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), rsa_hash);
+                    match handle.authenticate_publickey(&sc.user, with_hash).await {
+                        Ok(r) if r.success() => {
+                            authed = true;
+                            break;
+                        }
+                        Ok(_) => notes.push(format!("{}: sunucu kabul etmedi", path.display())),
+                        Err(e) => notes.push(format!("{}: {e}", path.display())),
+                    }
+                }
+                // Şifreli anahtar + parola yok → en sık sebep budur, söyle.
+                Err(e) => notes.push(format!("{}: anahtar okunamadı ({e})", path.display())),
+            }
+        }
+
+        if !authed && !sc.password.is_empty() {
+            match handle.authenticate_password(&sc.user, &sc.password).await {
+                Ok(r) if r.success() => authed = true,
+                Ok(_) => notes.push("parola: reddedildi".into()),
+                Err(e) => notes.push(format!("parola: {e}")),
+            }
+        }
+
+        if !authed {
+            if notes.is_empty() {
+                bail!(
+                    "kimlik doğrulama yolu yok: config'te ne `password` ne `key` var, \
+                     varsayılan anahtar da bulunamadı (~/.ssh/id_ed25519 …)"
+                );
+            }
+            bail!("kimlik doğrulama başarısız:\n  - {}", notes.join("\n  - "));
         }
 
         let channel = handle.channel_open_session().await?;
@@ -209,7 +355,7 @@ impl Ssh {
             .await
             .context("SFTP alt sistemi başlatılamadı")?;
 
-        Ok(Self { handle, sftp })
+        Ok(Connected::Ok(Box::new(Self { handle, sftp })))
     }
 
     /// Bağlanılan andaki geçerli uzak dizin (ör. kullanıcı home).

@@ -75,23 +75,76 @@ password), sonra tfs'i yeniden çalıştırın:
 Dosya bulunduğunuz dizine oluşturulur; başka bir yol vermek için argüman
 kullanın (`tfs sunucular.json` — gerekiyorsa alt dizinler de açılır).
 
-Sunucular `config.json` dosyasından okunur — birden fazla sunucu, parolalarıyla:
+Sunucular `config.json` dosyasından okunur — parola ya da **SSH anahtarı** ile:
 
 ```json
 {
   "servers": [
     { "name": "Prod", "host": "1.2.3.4", "port": 22, "user": "okan", "password": "***" },
-    { "name": "Test", "host": "test.local", "user": "root", "password": "***" }
+    { "name": "Anahtarla", "host": "sunucu.example.com", "user": "okan",
+      "key": "~/.ssh/id_ed25519" },
+    { "name": "Şifreli anahtar", "host": "test.local", "user": "root",
+      "key": "~/.ssh/id_rsa", "key_passphrase": "***" }
   ]
 }
 ```
 
-- `port` opsiyonel (varsayılan 22).
+| Alan | Zorunlu | Açıklama |
+|------|---------|----------|
+| `name` `host` `user` | evet | — |
+| `port` | hayır | varsayılan 22 |
+| `password` | hayır | anahtarla bağlanıyorsanız hiç yazmayın |
+| `key` | hayır | özel anahtar dosyası; `~` açılır |
+| `key_passphrase` | hayır | anahtar parolayla şifreliyse |
+
+**Kimlik doğrulama sırası** OpenSSH'inkiyle aynı — önce publickey, sonra parola:
+
+1. `key` doluysa o anahtar denenir.
+2. `key` boşsa `~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa` (var olanlar).
+3. Hâlâ olmadıysa ve `password` doluysa parola.
+
+Hiçbiri tutmazsa hata **hangi yöntemin neden düştüğünü** listeler (anahtar
+okunamadı / sunucu kabul etmedi / parola reddedildi).
+
 - Şablonu elle de kopyalayabilirsiniz: `config.example.json` → `config.json`.
   (Dosya hiç düzenlenmemişse — yani birebir şablonsa — `tfs` bağlanmayı denemez,
   yine dosyayı düzenlemeniz gerektiğini söyler.)
 - **Güvenlik**: parolalar düz metin tutulur; `config.json`'ı repoya koymayın
-  (`.gitignore`'a ekli). Anahtar (publickey) auth sonraki adımlarda.
+  (`.gitignore`'a ekli). Parola yerine anahtar kullanmak daha güvenlidir —
+  `key` verip `password` alanını hiç yazmayabilirsiniz.
+
+## Sunucu anahtarı doğrulaması (known_hosts)
+
+tfs bağlanmadan önce sunucunun anahtarını `~/.ssh/known_hosts` ile doğrular —
+OpenSSH ile **aynı dosyayı** kullanır, yani `ssh` ile kaydettiğiniz sunucular
+sessizce tanınır.
+
+**İlk bağlantıda** parmak izi gösterilir ve onayınız istenir:
+
+```
+┌ Bilinmeyen sunucu anahtarı ──────────────────────────────────┐
+│ 'Prod' (1.2.3.4:22) ilk kez bağlanıyorsunuz.                 │
+│                                                              │
+│   Anahtar türü : ssh-ed25519                                 │
+│   Parmak izi   : SHA256:4vQ…8Zk                              │
+│                                                              │
+│ Bu parmak izini sunucudan bağımsız bir yolla doğrulayın:     │
+│   ssh-keyscan -p PORT HOST | ssh-keygen -lf -                │
+│                                                              │
+│  E / Enter  kabul et ve bağlan     H / Esc  vazgeç           │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Kabul ederseniz anahtar `known_hosts`a eklenir ve bir daha sorulmaz.
+
+**Anahtar değiştiyse** bağlantı reddedilir ve uyarı gösterilir. Burada bilerek
+bir "kabul et" tuşu **yoktur**: anahtar değişikliği ortadaki-adam saldırısının
+imzasıdır, tek tuşla geçilebilir olsaydı korumanın anlamı kalmazdı. Sunucuyu
+yeniden kurduğunuzdan eminseniz kaydı elle silin:
+
+```sh
+ssh-keygen -R '[sunucu.example.com]:2244'
+```
 
 ## Çalıştırma
 
@@ -302,9 +355,8 @@ Davranış:
 - Transferler ayrı bir tokio task'inde, parça parça (64 KiB) yapılır ve `mpsc`
   ile ortada bir **progress bar** gösterilir — UI bloklanmaz.
 - Dosya izinleri/zaman damgaları korunmaz (SFTP `create` varsayılanı).
-- Sunucu anahtarı doğrulanmıyor (`check_server_key` daima `true`).
-  Prod'da `known_hosts` kontrolü ekle.
-- Sadece parola kimlik doğrulaması; anahtar (publickey) auth eklenebilir.
+- SSH agent (`ssh-agent` / Pageant) desteklenmiyor; anahtar dosyadan okunur.
+  Şifreli anahtarın parolası config'te düz metin durur.
 - OS dosya yöneticisi ↔ terminal DnD **mümkün değil** (terminal sınırı).
 - SSH terminali (F1): fare uzak programlara **iletilmez** (SGR mouse forwarding
   yok) — `htop`/`vim` içinde fare çalışmaz, fare seçme/kopyalama içindir.

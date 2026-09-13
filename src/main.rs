@@ -136,12 +136,27 @@ async fn app_flow(terminal: &mut Terminal<CrosstermBackend<Stdout>>, cfg: &Confi
     };
     let sc = &cfg.servers[idx];
 
-    terminal.draw(|f| picker::draw_connecting(f, &sc.name))?;
-    let ssh = Arc::new(
-        Ssh::connect(&sc.host, sc.port, &sc.user, &sc.password)
+    // Sunucu anahtarı bilinmiyorsa kullanıcıya sorup known_hosts'a ekleriz ve
+    // bir kez daha deneriz; bu yüzden döngü.
+    let ssh = loop {
+        terminal.draw(|f| picker::draw_connecting(f, &sc.name))?;
+        let attempt = Ssh::connect(sc)
             .await
-            .with_context(|| format!("'{}' sunucusuna bağlanılamadı", sc.name))?,
-    );
+            .with_context(|| format!("'{}' sunucusuna bağlanılamadı", sc.name))?;
+
+        match attempt {
+            ssh::Connected::Ok(s) => break Arc::new(*s),
+            ssh::Connected::HostKey(issue) => {
+                if !picker::confirm_host_key(terminal, sc, &issue).await? {
+                    return Ok(());
+                }
+                // Yalnızca `Unknown` onaylanabilir (bkz. `confirm_host_key`).
+                if let ssh::HostKeyIssue::Unknown { key, .. } = &issue {
+                    ssh::trust_host_key(&sc.host, sc.port, key)?;
+                }
+            }
+        }
+    };
 
     let mut app = App::new();
     app.load_local(std::env::current_dir()?)?;

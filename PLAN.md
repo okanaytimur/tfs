@@ -324,6 +324,28 @@ Terminal modunun döngüsünde `tokio::select!` ile üç kaynak dinlenir:
 - [x] 🐞 `temp_file_for` aynı milisaniyede çakışıyordu (pid+ms yetmiyor) →
       dizin artık münhasıran açılıyor (`create_dir` + sayaç), test eklendi.
 
+### Aşama 10 — güvenlik: known_hosts + publickey auth (2026-08-31)
+- [x] **`check_server_key` artık gerçekten doğruluyor** (eskiden koşulsuz `true`).
+      `~/.ssh/known_hosts` — OpenSSH ile aynı dosya, `russh::keys::check_known_hosts`.
+- [x] El sıkışma sırasında kullanıcıya soru soramadığımız için sorun bir
+      `Arc<Mutex<Option<HostKeyIssue>>>`e **kaydedilip** doğrulama `false`
+      dönüyor; `connect` bunu `Connected::HostKey` olarak yukarı taşıyor ve
+      kararı TUI veriyor (`picker::confirm_host_key`), onaydan sonra
+      `learn_known_hosts` + yeniden bağlanma.
+- [x] `Changed` (anahtar değişti) için **kabul et yolu yok** — MITM imzası;
+      kullanıcı `ssh-keygen -R` ile elle silmeli. `Unknown` onaylanabilir.
+- [x] **publickey auth**: `key` + `key_passphrase` config alanları; `key` boşsa
+      `~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa`. RSA için
+      `best_supported_rsa_hash` (SHA-1 çoğu sunucuda kapalı).
+- [x] `password` artık opsiyonel (`serde(default)`) — eski config'ler bozulmadan
+      çalışır, yeni config'lerde parola hiç yazılmayabilir.
+- [x] Hata mesajı hangi yöntemin neden düştüğünü listeliyor; "kimlik doğrulama
+      reddedildi" tek başına teşhis ettirmiyordu.
+- [x] 5 yeni test (toplam 36), clippy temiz.
+- [ ] Elle doğrula: bilinmeyen host (127.0.0.1:2244) → diyalog; bilinen host
+      (`[wikiokan.duckdns.org]:2244`) → sessiz; anahtarla giriş.
+- Kalan borç: SSH agent desteği yok; anahtar parolası config'te düz metin.
+
 ### Aşama 9 — panelde arama/filtreleme (2026-08-31)
 - [x] `Panel` artık `entries` (tamamı) + `view` (sorguya uyan indeksler) +
       `query` tutuyor. **Seçim, kaydırma ve fare isabet testi `view` üzerinden** —
@@ -492,8 +514,8 @@ düzelmezse ham log'a bak.
 - ✅ **Fareyle sekme geçişi** — üst çubuktaki F1/F2 sekmeleri tıklanabilir
   (`terminal::hit_tab`, main.rs global mouse yakalama).
 - ✅ **Fareyle metin seçme/kopyalama** + panodan yapıştırma + kaydırma (2026-07-31).
-- [ ] **Güvenlik (eski iskelet borçları)**: `known_hosts` doğrulaması
-  (`check_server_key` şu an daima `true`) + publickey (anahtar) auth.
+- ✅ **Güvenlik borçları kapandı** — Aşama 10 (2026-08-31): `known_hosts`
+  doğrulaması + publickey auth.
 - ✅ **Klasör (recursive) transferi** — Aşama 8'de eklendi (2026-08-30).
 - **Bağlantı kopunca** nazik yeniden bağlanma / picker'a dönüş.
 
