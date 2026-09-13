@@ -408,18 +408,17 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> **v0.4.0 GitHub'da yayında** (2026-08-31): push + release tamam, Linux binary
-> asset olarak yüklü. Kalanlar "## 12"de:
+> **v0.5.0 hazır ama yayınlanmadı.** (v0.4.0 tamamen yayında: GitHub release +
+> crates.io + üç binary.) Yapılacaklar "## 12"de:
 >
-> 1. ~~`git push origin main` + `git push origin v0.4.0`~~ ✅
-> 2. ~~`gh release create v0.4.0 …`~~ ✅
-> 3. [ ] `cargo login` → `cargo publish --dry-run` → `cargo publish`
->        (crates.io'da hâlâ 0.2.0 duruyor; bu makinada token yok).
-> 4. [ ] Windows makinada iki `.exe`yi derleyip `gh release upload` ile ekle.
+> 1. [ ] `git push origin main` + `git push origin v0.5.0`
+> 2. [ ] `gh release create v0.5.0 …` (Linux binary + notlar)
+> 3. [ ] `cargo publish --dry-run` → `cargo publish` (token Windows makinasında)
+> 4. [ ] Windows makinada iki `.exe`yi derleyip `gh release upload` ile ekle
 >
-> Sonraki iş (kod): "## 9.C" — `known_hosts` doğrulaması + publickey auth
-> (güvenlik borcu), klasör (recursive) transferi, bağlantı kopunca yeniden
-> bağlanma.
+> Sonraki kod işleri: SSH agent desteği (`ssh-agent`/Pageant), dosya
+> izinleri/zaman damgalarının transferde korunması, bağlantı kopunca yeniden
+> bağlanma, `main.rs`'i bölmek (1000+ satır).
 >
 > Henüz elle denenmemiş olanlar (fırsat oldukça): `vim`/`htop` tam ekran,
 > tekerlekle geçmişe kaydırma, `Shift+PgUp/PgDn`.
@@ -599,6 +598,37 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > # etiket ile yayınlanan commit aynı mı
 > git ls-remote --tags origin | grep 'vX.Y.Z'
 > ```
+
+### v0.5.0 (2026-08-31) — hazır, push + release + crates.io bekliyor
+
+Bu sefer **sıraya uyuldu**: tüm commit'ler → `cargo package` → *sonra* etiket.
+
+Yapıldı:
+- [x] Sürüm 0.5.0; `Cargo.lock` tazelendi.
+- [x] `cargo clippy --all-targets` temiz · `cargo test` **36/36** · release derlendi.
+- [x] `cargo package` doğrulandı (`config.example.json` pakette, PLAN.md yok).
+- [x] `dist/tfs-v0.5.0-linux-x86_64` — asgari **glibc 2.34**.
+- [x] `dist/RELEASE-v0.5.0.md` — güvenlik (known_hosts + publickey) ve arama.
+- [x] Commit'ler bittikten **sonra** `v0.5.0` etiketi.
+- ⚠️ Kısayol değişikliği sürüm notlarında öne çıkarıldı: `q`/`t`/`e` kalktı
+      (harfler aramaya gidiyor) → `Esc`/`F10`/`Ctrl+Q`, `F5`, `F4`.
+
+Kalan:
+```sh
+git push origin main && git push origin v0.5.0
+gh release create v0.5.0 dist/tfs-v0.5.0-linux-x86_64 \
+  --title "v0.5.0 — known_hosts doğrulaması, anahtarla giriş, panelde arama" \
+  --notes-file dist/RELEASE-v0.5.0.md
+cargo publish --dry-run && cargo publish     # token Windows makinasında
+```
+Windows binary'leri Windows makinada derlenip eklenmeli:
+```powershell
+cargo build --release
+cargo build --release --target i686-pc-windows-msvc
+```
+```sh
+gh release upload v0.5.0 dist/tfs-v0.5.0-windows-x86_64.exe dist/tfs-v0.5.0-windows-i686.exe
+```
 
 ### v0.4.0 — YAYINDA (GitHub release + crates.io, 2026-08-31)
 
