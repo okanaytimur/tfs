@@ -437,11 +437,11 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> **Bağlantı yöneticisi (2026-09-15) commit'lenmedi.** Sürüm numarası hâlâ
-> 0.5.0; yayına giderken bu özellik 0.6.0'a gider (README'de yeni
-> "Bağlantı yöneticisi" bölümü var).
+> **v0.6.0 yayınlandı** (2026-09-15): bağlantı yöneticisi + uygulama ikonu.
+> Adımlar "## 12"deki sıraya göre yapıldı (commit → dry-run → etiket → push →
+> publish + release), yani etiket yayınlanan commit'i gösteriyor.
 >
-> **v0.5.0 hazır ama yayınlanmadı.** (v0.4.0 tamamen yayında: GitHub release +
+> **(arşiv) v0.5.0 notu.** (v0.4.0 tamamen yayında: GitHub release +
 > crates.io + üç binary.) Yapılacaklar "## 12"de:
 >
 > 1. [ ] `git push origin main` + `git push origin v0.5.0`
@@ -639,6 +639,23 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > # etiket ile yayınlanan commit aynı mı
 > git ls-remote --tags origin | grep 'vX.Y.Z'
 > ```
+
+### v0.6.0 (2026-09-15) — YAYINDA
+
+Bağlantı yöneticisi (ekle/düzenle/kopyala/sil/sırala + arama, parola alanıyla)
+ve `.exe`ye gömülü uygulama ikonu.
+
+- [x] `Cargo.toml` `version = "0.6.0"`
+- [x] `cargo test` (47) + `cargo clippy --all-targets` temiz
+- [x] `cargo publish --dry-run`
+- [x] commit → etiket (`v0.6.0`) → `git push origin main && git push origin v0.6.0`
+- [x] `cargo publish`
+- [x] `gh release create v0.6.0` + iki Windows binary'si (x86_64, i686)
+- [x] Yayın sonrası doğrulama (crates.io sürümü, release asset'leri, etiket commit'i)
+
+Linux binary'si bu sürümde de yok (v0.5.0'da da yoktu; bu makinada Linux hedefi
+kurulu değil). `metadata.binstall`daki Linux URL'i bu yüzden 404 döner —
+Linux'ta `cargo binstall` kaynaktan derlemeye düşer, `cargo install` zaten çalışır.
 
 ### v0.5.0 (2026-08-31) — hazır, push + release + crates.io bekliyor
 
