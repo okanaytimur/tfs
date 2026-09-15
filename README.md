@@ -42,22 +42,28 @@ binary indirebilirsiniz:
 
 | Dosya | Platform | Not |
 |-------|----------|-----|
-| `tfs-vX-linux-x86_64` | Linux x86_64 | glibc 2.34+ · `chmod +x` · **yalnızca v0.4.0'da** (aşağı bak) |
+| `tfs-vX-linux-x86_64` | Linux x86_64 | **statik** — her dağıtımda çalışır · `chmod +x` |
 | `tfs-vX-windows-x86_64.exe` | Windows 10+ 64-bit | Önerilen |
 | `tfs-vX-windows-i686.exe` | Windows 10+ 32-bit | Eski/32-bit Windows |
 
 İndirdikten sonra yanına bir `config.json` koyup çalıştırın (bkz. Yapılandırma).
 
-> **Linux binary'si** en son v0.4.0 release'inde var; v0.5.0 ve v0.6.0 yalnızca
-> Windows binary'siyle çıktı (geliştirme makinasında Linux hedefi kurulu değil).
-> Linux'ta güncel sürüm için `cargo install tfs-ssh` kullanın — kaynaktan
-> derler, birkaç dakika sürer. `cargo binstall` da Linux'ta kaynağa düşer.
+> **Linux binary'si musl ile statik derlenir** (v0.6.0'dan beri): hiçbir sistem
+> kütüphanesine bağlı değil, `ldd` "not a dynamic executable" der. Yani glibc
+> sürümü diye bir kısıt yok — Ubuntu, Debian, RHEL, Arch, Alpine, hepsinde
+> aynı dosya çalışır. İndirip `chmod +x` yeter.
 
-**Platform desteği**: Linux (glibc 2.34+ — Ubuntu 22.04+, Debian 12+, RHEL 9+)
-ve Windows 10 ve üzeri. Windows 7/8 desteklenmez — Rust 1.78'den beri standart
-Windows hedefi Win7'yi bırakmıştır (binary'ler Win10+ ister). Win7 ancak Tier-3
-`*-win7-windows-msvc` hedefi + nightly + `-Z build-std` ile derlenebilir
-(deneysel, kripto/async yığınımızla test edilmedi).
+**Platform desteği**: Linux (x86_64) ve Windows 10 ve üzeri.
+
+Linux'ta **indirilen binary statik** olduğu için dağıtım/glibc kısıtı yoktur.
+Kaynaktan derlerseniz (`cargo install tfs-ssh`) binary o makinanın glibc'sine
+bağlanır — kendi makinanızda kullanacaksanız sorun değil, başka bir makinaya
+taşıyacaksanız aşağıdaki musl yolunu kullanın.
+
+Windows 7/8 desteklenmez — Rust 1.78'den beri standart Windows hedefi Win7'yi
+bırakmıştır (binary'ler Win10+ ister). Win7 ancak Tier-3 `*-win7-windows-msvc`
+hedefi + nightly + `-Z build-std` ile derlenebilir (deneysel, kripto/async
+yığınımızla test edilmedi).
 
 Linux'ta pano (kopyala/yapıştır) X11 ve Wayland'da çalışır, ek sistem
 kütüphanesi gerekmez; binary yalnızca `libc`/`libm`/`libgcc_s`'e bağlıdır.
@@ -475,8 +481,9 @@ server there and it writes `config.json` for you.
 
 ### Platforms
 
-Windows 10+ and Linux (glibc 2.34+ — Ubuntu 22.04+, Debian 12+, RHEL 9+).
-Windows 7/8 are not supported. Built with
+Windows 10+ and Linux (x86_64). The Linux binary is **statically linked with
+musl**, so it has no glibc or distro requirement — download it, `chmod +x`, run
+it anywhere. Windows 7/8 are not supported. Built with
 [ratatui](https://github.com/ratatui/ratatui) and
 [russh](https://github.com/Eugeny/russh). Dual-licensed MIT OR Apache-2.0.
 

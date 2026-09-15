@@ -11,7 +11,7 @@ keywords = ["ssh", "sftp", "terminal", "tui", "file-transfer"]
 categories = ["command-line-utilities", "network-programming"]
 # PLAN.md oturumlar arası iç çalışma notu (33 KB) — depoda kalsın ama crates.io
 # paketine girmesin; paketin neredeyse yarısıydı ve kullanıcıya hitap etmiyor.
-exclude = ["PLAN.md", "assets/icon.py", "assets/tfs.png"]
+exclude = ["PLAN.md", "TERMINALTROVE.md", "assets/icon.py", "assets/tfs.png"]
 
 # `cargo binstall tfs-ssh` — derlemeden, GitHub Releases'ten hazır binary indirir.
 # Bu bölüm crates.io'ya yüklenen sürümden okunur, GitHub'daki Cargo.toml'dan

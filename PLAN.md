@@ -653,9 +653,7 @@ ve `.exe`ye gömülü uygulama ikonu.
 - [x] `gh release create v0.6.0` + iki Windows binary'si (x86_64, i686)
 - [x] Yayın sonrası doğrulama (crates.io sürümü, release asset'leri, etiket commit'i)
 
-Linux binary'si bu sürümde de yok (v0.5.0'da da yoktu; bu makinada Linux hedefi
-kurulu değil). `metadata.binstall`daki Linux URL'i bu yüzden 404 döner —
-Linux'ta `cargo binstall` kaynaktan derlemeye düşer, `cargo install` zaten çalışır.
+- [x] Linux binary'si (statik musl) release'e eklendi — bkz. "## 10.4".
 
 ### v0.5.0 (2026-08-31) — hazır, push + release + crates.io bekliyor
 
@@ -760,9 +758,34 @@ cargo build --release --target i686-pc-windows-msvc    # i686
 gh release upload v0.4.0 dist/tfs-v0.4.0-windows-x86_64.exe dist/tfs-v0.4.0-windows-i686.exe
 ```
 
-### İsteğe bağlı — musl statik Linux binary'si
-glibc 2.34 altındaki dağıtımları (Ubuntu 20.04, Debian 11, CentOS 7) da
-kapsamak için. `ring`'in C kodu musl derleyicisi ister:
+### 10.4 Linux binary'si — Docker ile, Windows'tan (ÇÖZÜLDÜ 2026-09-15)
+
+Linux binary'si için ne Linux makinaya ne WSL kurulumuna gerek var. `rust:alpine`
+imajı zaten musl tabanlı, yani çıkan şey **doğrudan statik**:
+
+```powershell
+docker run --rm -v "C:/Users/okan/Desktop/tfs/tfs:/w" -w /w rust:alpine \
+  sh -c "apk add --no-cache build-base && \
+         cargo build --release --target-dir /tmp/t && \
+         cp /tmp/t/release/tfs dist/tfs-vX.Y.Z-linux-x86_64"
+```
+
+`dist/tfs-vX.Y.Z-linux-x86_64` adı **kritik**: `metadata.binstall` tam olarak bu
+kalıbı bekliyor, tutmazsa Linux'ta `cargo binstall` 404 alır.
+
+Neden musl (glibc değil): normal derlemede binary, derlendiği makinanın glibc
+sürümünü ister. Ubuntu 26.04'te derlenen bir binary Ubuntu 22.04'te çalışmaz ve
+README'nin "glibc 2.34+" iddiası yalan olur. Statik musl bu sınıf sorunu
+tamamen ortadan kaldırıyor — `file` çıktısı `static-pie linked`, `ldd` ise
+"not a dynamic executable" diyor.
+
+`--target-dir /tmp/t` bilinçli: konteyner Windows'taki `target/` dizinine
+yazarsa, sonraki Windows derlemesi tüm bağımlılıkları yeniden derler.
+
+Not: binary `strip`lenmemiş (8.5 MB). Küçültmek isterseniz aynı konteynerde
+`strip` çalıştırılabilir; şimdilik hata ayıklaması kolay kalsın diye dokunulmadı.
+
+#### (arşiv) Linux makinada elle musl
 ```sh
 sudo dnf install -y musl-gcc          # Fedora paketi mevcut (1.2.5)
 rustup target add x86_64-unknown-linux-musl
