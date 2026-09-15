@@ -4,10 +4,31 @@
 > bunu oku; "Durum" bölümündeki kutucuklardan (`[ ]` / `[x]`) nerede kaldığımızı
 > gör ve "Sıradaki adım"dan devam et.
 
-Son güncelleme: 2026-08-31
+Son güncelleme: 2026-09-15
 
 > **DURUM: Aşama 0–4 + bug düzeltmeleri tamam, çalışır durumda (clippy temiz).**
 > F1 SSH terminali + F2 dosya transferi entegre edildi.
+>
+> **2026-09-15 yapılanlar (Aşama 11 — bağlantı yöneticisi):**
+> - ✅ Açılış ekranı artık **bağlantı yöneticisi**: ekle / düzenle / kopyala /
+>   sil / sırala + arama, hepsi TUI içinde. `config.json`ı elle açmak bitti.
+>   İlham: [ssh-list](https://github.com/akinoiro/ssh-list) — **farkı: parola
+>   alanı da var** (ssh-list bilinçli olarak parola saklamaz, çünkü işi harici
+>   `ssh` istemcisine devreder; tfs bağlantıyı kendi kurduğu için saklayabiliyor).
+> - ✅ `config.rs` artık **yazıyor da**: `Config::save` — atomik (`.json.tmp` →
+>   rename), Unix'te `0600`. `ServerConfig`/`Config` `Serialize` aldı; boş
+>   `password`/`key`/`key_passphrase` dosyaya hiç yazılmıyor.
+> - ✅ İlk çalıştırma akışı değişti: eskiden şablonun yolunu yazıp **çıkıyorduk**
+>   (`print_config_hint` silindi). Artık yönetici boş listeyle açılıyor, ilk
+>   bağlantı arayüzde kuruluyor. `Loaded::NeedsEditing` artık alansız.
+> - ✅ Parolalar arayüzde `•` ile maskeli; **F9** gösterir/gizler.
+> - ⚠ **Kısayol değişikliği**: açılış ekranında `q` artık arama kutusuna yazıyor
+>   (panellerdeki "yazmaya başlayınca filtreler" davranışıyla aynı). Çıkış:
+>   `Esc` / `Ctrl+Q` / `F10` — app.rs'teki kurallarla birebir.
+> - ✅ Testler: 47 (10 yeni) — kaydet/geri-oku turu, form doğrulama, UTF-8 imleç,
+>   ve `TestBackend` ile **dar terminal çizim smoke testi**. Sonuncusu iki gerçek
+>   paniği yakaladı (form düğme satırı ve araç çubuğu tamponun dışına taşıyordu);
+>   elle `Rect` kuran her yeni ekranı bu teste ekle.
 >
 > **2026-07-25 yapılanlar:**
 > - ✅ BUG düzeltildi: tek-satır-komut sonrası ekran temizlenmesi → terminal
@@ -408,6 +429,10 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
+> **Bağlantı yöneticisi (2026-09-15) commit'lenmedi.** Sürüm numarası hâlâ
+> 0.5.0; yayına giderken bu özellik 0.6.0'a gider (README'de yeni
+> "Bağlantı yöneticisi" bölümü var).
+>
 > **v0.5.0 hazır ama yayınlanmadı.** (v0.4.0 tamamen yayında: GitHub release +
 > crates.io + üç binary.) Yapılacaklar "## 12"de:
 >
@@ -437,6 +462,14 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 - Tuş çift-algılama: tüm giriş noktalarında `KeyEventKind::Press` filtresi var.
 - Editör: `src/editor.rs` (mekanik) + `main.rs::run_edit` (akış). Askıya alma
   deseni için üstteki 2026-08-30 notundaki `EventStream` uyarısını oku.
+- Bağlantı yöneticisi: `src/picker.rs` — `Manager` (liste + arama + eylemler),
+  `Mode::{List,Form,Confirm}`, `Form` (7 alan, karakter-indeksli imleç).
+  `Manager::act` tek giriş noktası: hem düğme tıklaması hem kısayol oraya iner.
+  Yazma `config::Config::save`; `Manager::persist` her mutasyondan sonra çağırır.
+- **`Frame::render_widget` alanı kırpmaz** — tamponun dışına taşan bir `Rect`
+  panikler. `picker.rs` elle `Rect` kurduğu için her satırda sınır kontrolü var
+  (`alt_sinir`/`sag_sinir`, `draw_toolbar`'daki `area.height == 0`). Yeni ekran
+  eklerken `cizim_dar_terminalde_panik_etmez` testine boyut/kip ekle.
 
 ---
 

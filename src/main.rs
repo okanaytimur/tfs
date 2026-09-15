@@ -80,60 +80,36 @@ enum Screen {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config_path = std::env::args().nth(1).unwrap_or_else(|| "config.json".into());
-    let cfg = match Config::load_or_create(&config_path)? {
+    let mut cfg = match Config::load_or_create(&config_path)? {
         Loaded::Ready(c) => c,
-        // Yapılandırma yok ya da hiç doldurulmamış: şablonu gösterip nazikçe çık
-        // (TUI hiç açılmadığı için düz yazdırmak güvenli).
-        Loaded::NeedsEditing { path, created } => {
-            print_config_hint(&path, created);
-            return Ok(());
-        }
+        // Yapılandırma yok ya da hiç doldurulmamış. Eskiden burada şablonun
+        // yolunu yazıp çıkıyorduk; artık bağlantı yöneticisi **boş listeyle**
+        // açılıyor ve kullanıcı ilk bağlantısını doğrudan arayüzde kuruyor
+        // (şablondaki uydurma kayıtlar listeye sokulmuyor — ilk kayıtta
+        // üzerlerine yazılır).
+        Loaded::NeedsEditing => Config::default(),
     };
 
     let mut terminal = setup_terminal()?;
     // TUI içindeki tüm akışı sar; hata olsa da terminali geri yükle.
-    let res = app_flow(&mut terminal, &cfg).await;
+    let res = app_flow(&mut terminal, &mut cfg, &config_path).await;
     restore_terminal(&mut terminal)?;
     res
 }
 
-/// Yapılandırma doldurulmadığında gösterilen yönlendirme. TUI açılmadan önce
-/// (ya da hiç açılmadan) çağrılır, bu yüzden düz `println!` kullanılır.
-fn print_config_hint(path: &std::path::Path, created: bool) {
-    let p = path.display();
-    println!();
-    if created {
-        println!("tfs — ilk çalıştırma");
-        println!();
-        println!("Yapılandırma dosyası bulunamadı, sizin için örnek bir tane oluşturuldu:");
-    } else {
-        println!("tfs — yapılandırma henüz düzenlenmemiş");
-        println!();
-        println!("Bu dosya hâlâ örnek şablonun aynısı:");
-    }
-    println!();
-    println!("    {p}");
-    println!();
-    println!("Dosyayı açıp kendi sunucularınızı yazın (name / host / port / user /");
-    println!("password), sonra tfs'i yeniden çalıştırın:");
-    println!();
-    if cfg!(windows) {
-        println!("    notepad \"{p}\"");
-    } else {
-        println!("    ${{EDITOR:-nano}} \"{p}\"");
-    }
-    println!();
-    println!("Farklı bir dosya kullanmak için yolunu argüman verin:  tfs sunucular.json");
-    println!("Not: parolalar düz metin saklanır — dosyayı paylaşmayın, repoya koymayın.");
-    println!();
-}
-
 /// Sunucu seç → bağlan → dosya tarayıcısını çalıştır.
-async fn app_flow(terminal: &mut Terminal<CrosstermBackend<Stdout>>, cfg: &Config) -> Result<()> {
-    let idx = match picker::run(terminal, &cfg.servers).await? {
+async fn app_flow(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    cfg: &mut Config,
+    config_path: &str,
+) -> Result<()> {
+    let idx = match picker::run(terminal, &mut cfg.servers, config_path).await? {
         Some(i) => i,
         None => return Ok(()), // kullanıcı çıktı
     };
+    // `idx`, yöneticiden **çıkıldığı andaki** listeye göre; kullanıcı orada
+    // ekleme/silme/sıralama yapmış olabilir, o yüzden indeks ancak burada
+    // çözülür.
     let sc = &cfg.servers[idx];
 
     // Sunucu anahtarı bilinmiyorsa kullanıcıya sorup known_hosts'a ekleriz ve

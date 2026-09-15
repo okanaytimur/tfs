@@ -53,29 +53,16 @@ Kaynaktan derlemek için bir C linker gerekir (`dnf install gcc` /
 
 ## Yapılandırma
 
-**İlk çalıştırmada bir şey hazırlamanıza gerek yok**: `config.json` yoksa `tfs`
-hata vermez, örnek bir tane oluşturur ve dosyanın tam yolunu gösterip çıkar.
-Dosyayı açıp kendi sunucularınızı yazın, `tfs`'i tekrar çalıştırın.
-
-```
-$ tfs
-
-tfs — ilk çalıştırma
-
-Yapılandırma dosyası bulunamadı, sizin için örnek bir tane oluşturuldu:
-
-    D:\isler\config.json
-
-Dosyayı açıp kendi sunucularınızı yazın (name / host / port / user /
-password), sonra tfs'i yeniden çalıştırın:
-
-    notepad "D:\isler\config.json"
-```
+**İlk çalıştırmada bir şey hazırlamanıza gerek yok** ve dosyayı elle açmanız da
+gerekmiyor: `tfs` açılışta **bağlantı yöneticisiyle** gelir, ilk bağlantınızı
+oradan kurarsınız (bkz. [Bağlantı yöneticisi](#bağlantı-yöneticisi-açılış-ekranı)).
+Yaptığınız her değişiklik anında `config.json`'a yazılır.
 
 Dosya bulunduğunuz dizine oluşturulur; başka bir yol vermek için argüman
 kullanın (`tfs sunucular.json` — gerekiyorsa alt dizinler de açılır).
 
-Sunucular `config.json` dosyasından okunur — parola ya da **SSH anahtarı** ile:
+Dosyayı elle düzenlemeyi tercih ederseniz biçimi şu — parola ya da
+**SSH anahtarı** ile:
 
 ```json
 {
@@ -107,8 +94,11 @@ Hiçbiri tutmazsa hata **hangi yöntemin neden düştüğünü** listeler (anaht
 okunamadı / sunucu kabul etmedi / parola reddedildi).
 
 - Şablonu elle de kopyalayabilirsiniz: `config.example.json` → `config.json`.
-  (Dosya hiç düzenlenmemişse — yani birebir şablonsa — `tfs` bağlanmayı denemez,
-  yine dosyayı düzenlemeniz gerektiğini söyler.)
+  (Dosya hiç düzenlenmemişse — yani birebir şablonsa — `tfs` şablondaki uydurma
+  sunucuları listelemez; yönetici boş açılır, ilk kaydınızda üzerine yazılır.)
+- Yönetici dosyayı **atomik** yazar (önce `config.json.tmp`, sonra taşır), yani
+  yarıda kesilen bir yazma elinizdeki config'i bozmaz. Unix'te dosya `0600`'e
+  çekilir.
 - **Güvenlik**: parolalar düz metin tutulur; `config.json`'ı repoya koymayın
   (`.gitignore`'a ekli). Parola yerine anahtar kullanmak daha güvenlidir —
   `key` verip `password` alanını hiç yazmayabilirsiniz.
@@ -284,10 +274,69 @@ cargo install --locked fresh-editor   # kaynaktan
   `F1 Terminal` / `F2 Dosya` sekmelerine **fareyle de tıklanabilir**.
 - **F4**: seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).
 
-## Sunucu seçme ekranı
+## Bağlantı yöneticisi (açılış ekranı)
 
-- Açılışta `config.json`'daki sunucular listelenir.
-- **Tek tık** ilgili sunucuya bağlanır; `↑/↓` + `Enter` de çalışır; `q` çıkar.
+Açılışta `config.json`'daki bağlantılar listelenir ve **aynı ekranda** düzenlenir
+— dosyayı elle açmanız gerekmez. Her değişiklik anında kaydedilir.
+
+```
+┌ SSH Bağlantıları (3) ─────────────────┬ Ayrıntı ───────────────┐
+│ ▶ Prod Sunucu   okan@1.2.3.4:22       │ Ad             Prod... │
+│   Yedek         root@10.0.0.7:2222    │ Sunucu         1.2.3.4 │
+│   Test          okan@test.local:22    │ Kullanıcı      okan    │
+│                                       │                        │
+│                                       │ Kimlik doğrulama       │
+│                                       │   Anahtar      varsa.. │
+│                                       │   Parola       •••••   │
+└───────────────────────────────────────┴────────────────────────┘
+ [ + Yeni (F5) ] [ Düzenle (F4) ] [ Kopyala (F6) ] [ Sil (F8) ] [ ↑ ] [ ↓ ]
+ Enter / tıkla: bağlan · yaz: ara · Esc: çık · config.json
+```
+
+| İşlem | Fare | Klavye |
+|-------|------|--------|
+| Bağlan | satıra **tek tık** | `Enter` |
+| Yeni bağlantı | `[+ Yeni]` | `F5` · `Insert` |
+| Düzenle | `[Düzenle]` | `F4` |
+| Kopyala (çoğalt) | `[Kopyala]` | `F6` |
+| Sil | `[Sil]` | `F8` · `Delete` |
+| Sırala | `[↑]` `[↓]` | `Alt+↑` · `Alt+↓` |
+| Ara | — | doğrudan yazın |
+| Çık | — | `Esc` · `Ctrl+Q` · `F10` |
+
+Arama ad, host **ve** kullanıcı adını tarar — `root` ya da `10.0` yazmak da
+bulur. `Esc` önce aramayı temizler, arama yokken çıkar (panellerdeki davranışın
+aynısı). Sıralama arama açıkken kapalıdır: gördüğünüz komşu ile gerçek komşu
+farklı olurdu.
+
+### Düzenleme formu
+
+```
+┌ Bağlantıyı düzenle ──────────────────────────────────────────┐
+│ Ad                Prod Sunucu                                │
+│ Sunucu (host)     1.2.3.4                                    │
+│ Port              22                                         │
+│ Kullanıcı         okan                                       │
+│ Parola            ••••••••                                   │
+│ Anahtar dosyası   ~/.ssh/id_ed25519                          │
+│ Anahtar parolası                                             │
+│                                                              │
+│                                                              │
+│  [ Kaydet (Enter) ]  [ Vazgeç (Esc) ]  [ Parolayı göster ]   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- `Tab` / `↑` `↓` alanlar arası; alana **tıklayarak** da geçebilirsiniz.
+- `Enter` (ya da `Ctrl+S` / `F10`) kaydeder, `Esc` vazgeçer.
+- **`F9` parolaları gösterir/gizler** — normalde `•` ile maskelidirler.
+- `Port` alanı yalnızca rakam alır. Boş bırakılırsa `22`, `Ad` boş bırakılırsa
+  host adı kullanılır.
+- Parolanın başındaki/sonundaki boşluk **korunur** (diğer alanlar kırpılır).
+
+> **`ssh-list`ten farkı:** [ssh-list](https://github.com/akinoiro/ssh-list) bilinçli
+> olarak parola saklamaz, çünkü işi harici `ssh` istemcisine devreder. tfs SSH
+> bağlantısını kendi kurduğu için parolayı saklama seçeneği sunar — ama düz metin
+> olduğunu unutmayın; mümkünse `Anahtar dosyası` alanını kullanın.
 
 ## Arama — yazmaya başlayın
 
