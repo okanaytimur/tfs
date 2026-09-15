@@ -1,3 +1,5 @@
+<img src="assets/tfs.png" width="88" align="right" alt="tfs ikonu">
+
 # tfs (terminal-file-send) — SSH dosya tarayıcısı + modern SSH terminali
 
 ratatui + russh + russh-sftp ile:

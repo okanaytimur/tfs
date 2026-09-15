@@ -11,7 +11,7 @@ keywords = ["ssh", "sftp", "terminal", "tui", "file-transfer"]
 categories = ["command-line-utilities", "network-programming"]
 # PLAN.md oturumlar arası iç çalışma notu (33 KB) — depoda kalsın ama crates.io
 # paketine girmesin; paketin neredeyse yarısıydı ve kullanıcıya hitap etmiyor.
-exclude = ["PLAN.md"]
+exclude = ["PLAN.md", "assets/icon.py", "assets/tfs.png"]
 
 # `cargo binstall tfs-ssh` — derlemeden, GitHub Releases'ten hazır binary indirir.
 # Bu bölüm crates.io'ya yüklenen sürümden okunur, GitHub'daki Cargo.toml'dan
@@ -37,6 +37,11 @@ pkg-url = "{ repo }/releases/download/v{ version }/tfs-v{ version }-linux-x86_64
 [[bin]]
 name = "tfs"
 path = "src/main.rs"
+
+# Windows binary'sine ikon gömmek için (bkz. build.rs). Yalnızca Windows
+# host'ta çekilir; Linux derlemesi bu bağımlılığı hiç görmez.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [dependencies]
 ratatui = "0.29"

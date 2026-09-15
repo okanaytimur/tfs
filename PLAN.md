@@ -25,6 +25,14 @@ Son güncelleme: 2026-09-15
 > - ⚠ **Kısayol değişikliği**: açılış ekranında `q` artık arama kutusuna yazıyor
 >   (panellerdeki "yazmaya başlayınca filtreler" davranışıyla aynı). Çıkış:
 >   `Esc` / `Ctrl+Q` / `F10` — app.rs'teki kurallarla birebir.
+> - ✅ **İkon**: `assets/tfs.ico` → `build.rs` + `winresource` ile `.exe`ye gömülü
+>   (sürüm bilgisiyle birlikte: ProductName / FileDescription). İkon `assets/icon.py`
+>   ile **üretiliyor** (Pillow); elle çizilmiş bir dosya değil, değiştirmek isteyen
+>   betiği çalıştırır: `python assets/icon.py assets A`. Varyantlar betikte —
+>   A karşılıklı oklar (seçilen), B yukarı/aşağı, C iki panel, D prompt.
+>   `.ico` içinde ≤48 px BMP, büyükler PNG (256'yı BMP yazmak tek başına 256 KB'dı).
+>   `res.compile()` hatası derlemeyi **kırmıyor**, uyarı basıp geçiyor — `rc.exe`
+>   olmayan bir makinada `cargo install` süsleme yüzünden düşmesin.
 > - ✅ Testler: 47 (10 yeni) — kaydet/geri-oku turu, form doğrulama, UTF-8 imleç,
 >   ve `TestBackend` ile **dar terminal çizim smoke testi**. Sonuncusu iki gerçek
 >   paniği yakaladı (form düğme satırı ve araç çubuğu tamponun dışına taşıyordu);
