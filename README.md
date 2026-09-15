@@ -35,6 +35,9 @@ cargo binstall tfs-ssh
 > crates.io'da `tfs` adı başkasına ait olduğu için paket adı **`tfs-ssh`**;
 > kurulan komut yine **`tfs`**'tir.
 
+
+<img width="1920" height="1032" alt="image" src="https://github.com/user-attachments/assets/add6da2a-7351-496d-b2a4-d4bcbc1a80ba" />
+
 ### Hazır sürümler (derlemeye gerek yok)
 
 [**Releases**](https://github.com/okanaytimur/tfs/releases) sayfasından hazır
