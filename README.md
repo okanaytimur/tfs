@@ -2,6 +2,12 @@
 
 # tfs (terminal-file-send) — SSH dosya tarayıcısı + modern SSH terminali
 
+<!-- Demo GIF'i buraya: assets/demo.gif olarak koyup alttaki satırın yorumunu kaldır.
+![tfs demo](assets/demo.gif)
+-->
+
+*🇬🇧 [English summary](#english) · `cargo install tfs-ssh`*
+
 ratatui + russh + russh-sftp ile:
 - **F2** — iki panelli (YEREL ↔ UZAK) SFTP dosya **ve klasör** transferi:
   `t` ile ya da fareyle sürükle-bırak,
@@ -36,11 +42,16 @@ binary indirebilirsiniz:
 
 | Dosya | Platform | Not |
 |-------|----------|-----|
-| `tfs-vX-linux-x86_64` | Linux x86_64 | glibc 2.34+ · indirdikten sonra `chmod +x` |
+| `tfs-vX-linux-x86_64` | Linux x86_64 | glibc 2.34+ · `chmod +x` · **yalnızca v0.4.0'da** (aşağı bak) |
 | `tfs-vX-windows-x86_64.exe` | Windows 10+ 64-bit | Önerilen |
 | `tfs-vX-windows-i686.exe` | Windows 10+ 32-bit | Eski/32-bit Windows |
 
 İndirdikten sonra yanına bir `config.json` koyup çalıştırın (bkz. Yapılandırma).
+
+> **Linux binary'si** en son v0.4.0 release'inde var; v0.5.0 ve v0.6.0 yalnızca
+> Windows binary'siyle çıktı (geliştirme makinasında Linux hedefi kurulu değil).
+> Linux'ta güncel sürüm için `cargo install tfs-ssh` kullanın — kaynaktan
+> derler, birkaç dakika sürer. `cargo binstall` da Linux'ta kaynağa düşer.
 
 **Platform desteği**: Linux (glibc 2.34+ — Ubuntu 22.04+, Debian 12+, RHEL 9+)
 ve Windows 10 ve üzeri. Windows 7/8 desteklenmez — Rust 1.78'den beri standart
@@ -417,3 +428,57 @@ Davranış:
 
 `russh` varsayılanı `aws-lc-rs` Windows'ta NASM ister; bu yüzden `Cargo.toml`'da
 `ring` backend'i seçili (NASM gerektirmez).
+
+---
+
+## English
+
+**tfs** (*terminal-file-send*) is a mouse-first terminal UI that puts an **SFTP
+file browser** and a **full interactive SSH terminal** on a *single* SSH
+connection. Switch between them with `F1` / `F2` — no reconnect, no second
+session, no second tool.
+
+### Features
+
+- **`F2` — two-pane file manager** (local ↔ remote). Transfer files *and whole
+  folders* by dragging them with the mouse, or with a keystroke. Live progress,
+  cancel with `Esc`.
+- **`F1` — a real terminal.** VT100 emulation, so `vim`, `htop` and other
+  full-screen programs work. Mouse text selection, clipboard copy/paste
+  (right-click pastes), and 1000 lines of scrollback.
+- **Built-in connection manager.** Add, edit, duplicate, reorder, delete and
+  search your servers without leaving the TUI. Unlike most SSH launchers it can
+  **store passwords** for you — masked on screen (`F9` reveals), written
+  atomically, and the file is `chmod 0600` on Unix. Prefer keys? Leave the
+  password empty and point it at your private key instead.
+- **`F4` — edit a remote file** in the [`fresh`](https://github.com/sinelaw/fresh)
+  editor: tfs downloads it, opens the editor, and uploads it back when you save.
+- **Type to filter.** Start typing in any pane or in the connection list and it
+  filters as you go — no separate search mode.
+- **Host key verification** against the same `~/.ssh/known_hosts` OpenSSH uses,
+  plus publickey auth (`id_ed25519` → `id_ecdsa` → `id_rsa`, or a key you name).
+  When auth fails it tells you *which* method failed and why.
+
+### Install
+
+```sh
+cargo install tfs-ssh     # the installed command is `tfs`
+cargo binstall tfs-ssh    # prebuilt binary, no compiling (Windows)
+```
+
+The crate is called `tfs-ssh` because `tfs` was already taken on crates.io — the
+command it installs is still `tfs`. Prebuilt Windows binaries (64-bit and 32-bit)
+are on the [Releases](https://github.com/okanaytimur/tfs/releases) page.
+
+On first run tfs opens the connection manager with an empty list; add your first
+server there and it writes `config.json` for you.
+
+### Platforms
+
+Windows 10+ and Linux (glibc 2.34+ — Ubuntu 22.04+, Debian 12+, RHEL 9+).
+Windows 7/8 are not supported. Built with
+[ratatui](https://github.com/ratatui/ratatui) and
+[russh](https://github.com/Eugeny/russh). Dual-licensed MIT OR Apache-2.0.
+
+> The rest of this README is in Turkish; the sections above cover configuration,
+> key bindings and troubleshooting in more detail.
