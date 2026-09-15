@@ -36,7 +36,11 @@ cargo binstall tfs-ssh
 > kurulan komut yine **`tfs`**'tir.
 
 
-<img width="1920" height="1032" alt="image" src="https://github.com/user-attachments/assets/add6da2a-7351-496d-b2a4-d4bcbc1a80ba" />
+<img width="1920" height="1032" alt="image" src="https://github.com/user-attachments/assets/56fa5a79-e388-4b4b-923c-888076b34a95" />
+
+<img width="1920" height="1032" alt="WindowsTerminal_YePtwX4rZd" src="https://github.com/user-attachments/assets/9faf4b24-d247-4ae8-96e5-81bdc1b49bee" />
+
+
 
 ### Hazır sürümler (derlemeye gerek yok)
 
