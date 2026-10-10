@@ -201,7 +201,14 @@ impl App {
             remote: Panel::new(),
             focus: PanelId::Local,
             drag: None,
-            status: "Yazmaya başla = ara · F5: transfer · F4: düzenle · Esc: temizle/çık".into(),
+            status: {
+                let k = crate::keys::get();
+                format!(
+                    "Yazmaya başla = ara · {}: transfer · {}: düzenle · Esc: temizle/çık",
+                    k.transfer.label(),
+                    k.edit.label()
+                )
+            },
             should_quit: false,
             pending_transfer: None,
             transfer: None,
@@ -438,16 +445,18 @@ impl App {
     /// Dosya modunda tuşlar.
     ///
     /// **Yazılabilir her karakter arama sorgusuna gider** — bu yüzden eski tek
-    /// harfli kısayollar (`q`/`t`/`e`) yoktur; yerlerine F-tuşları (Norton/MC
-    /// geleneği) ve `Ctrl+Q` geçti.
+    /// harfli kısayollar (`q`/`t`/`e`) yoktur; çıkış/aktarma/düzenleme tuşları
+    /// `config.json` → `keys`ten gelir (varsayılan F-tuşları + Ctrl'li eşleri).
     async fn handle_key(&mut self, k: KeyEvent, ssh: &Ssh) -> Result<()> {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
+        let keys = crate::keys::get();
 
         match k.code {
-            // --- Çıkış ---
-            KeyCode::Char('q') | KeyCode::Char('Q') if ctrl => self.should_quit = true,
-            KeyCode::F(10) => self.should_quit = true,
+            // --- Değiştirilebilir kısayollar (keys.rs) ---
+            _ if keys.quit.matches(&k) => self.should_quit = true,
+            _ if keys.edit.matches(&k) => self.request_edit(),
+            _ if keys.transfer.matches(&k) => self.request_transfer_selected(),
             // Esc önce aramayı temizler; arama yokken çıkar.
             KeyCode::Esc => {
                 let p = self.panel_mut(self.focus);
@@ -459,8 +468,6 @@ impl App {
             }
 
             // --- Eylemler ---
-            KeyCode::F(4) => self.request_edit(),
-            KeyCode::F(5) => self.request_transfer_selected(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     PanelId::Local => PanelId::Remote,

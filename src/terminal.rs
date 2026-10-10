@@ -1,4 +1,4 @@
-//! F1 — modern SSH terminali (PTY + VT100 emülasyonu).
+//! SSH terminal modu (varsayılan Alt+1) — modern SSH terminali (PTY + VT100 emülasyonu).
 //!
 //! Sunucudan gelen ANSI bayt akışı `vt100::Parser` ile bir ekran ızgarasına
 //! çevrilir ve `tui-term`'in `PseudoTerminal` widget'ı ile çizilir. Kullanıcı
@@ -26,10 +26,17 @@ const SCROLLBACK: usize = 1000;
 /// Fare tekerleği / Shift+PgUp bir adımda kaç satır kaydırır.
 pub const SCROLL_STEP: usize = 3;
 
-/// Üst çubuktaki sekme etiketleri (fare hit-test'i ile senkron kalması için sabit).
-const TAB_F1: &str = " F1 Terminal ";
 const TAB_GAP: &str = " ";
-const TAB_F2: &str = " F2 Dosya ";
+
+/// Üst çubuktaki sekme etiketleri, kısayol adlarıyla (` Alt+1 Terminal `).
+/// Çizim ve fare hit-test'i ikisi de buradan okur, senkron kalsınlar diye.
+fn tab_labels() -> (String, String) {
+    let k = crate::keys::get();
+    (
+        format!(" {} Terminal ", k.terminal.label()),
+        format!(" {} Dosya ", k.files.label()),
+    )
+}
 
 /// Üst çubuktaki tıklanabilir sekmeler.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,9 +51,10 @@ pub fn hit_tab(col: u16, row: u16) -> Option<Tab> {
     if row != 0 {
         return None;
     }
-    let f1_w = TAB_F1.chars().count() as u16;
+    let (tab_term, tab_files) = tab_labels();
+    let f1_w = tab_term.chars().count() as u16;
     let gap_w = TAB_GAP.chars().count() as u16;
-    let f2_w = TAB_F2.chars().count() as u16;
+    let f2_w = tab_files.chars().count() as u16;
     let f2_start = f1_w + gap_w;
     if col < f1_w {
         Some(Tab::Terminal)
@@ -464,7 +472,9 @@ fn encode_key(key: &KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Insert => b"\x1b[2~".to_vec(),
         KeyCode::Delete => b"\x1b[3~".to_vec(),
         KeyCode::F(n) => match n {
-            // F1/F2 uygulama-global mod tuşları — kabuğa iletilmez (main.rs yakalar).
+            // Mod tuşu olarak tanımlanan F-tuşu buraya hiç gelmez (main.rs önce yakalar).
+            1 => b"\x1bOP".to_vec(),
+            2 => b"\x1bOQ".to_vec(),
             3 => b"\x1bOR".to_vec(),
             4 => b"\x1bOS".to_vec(),
             5 => b"\x1b[15~".to_vec(),
@@ -572,10 +582,12 @@ pub fn draw_top_bar(
         (inactive, active)
     };
 
+    let keys = crate::keys::get();
+    let (tab_term, tab_files) = tab_labels();
     let mut spans = vec![
-        Span::styled(TAB_F1, term_style),
+        Span::styled(tab_term, term_style),
         Span::raw(TAB_GAP),
-        Span::styled(TAB_F2, files_style),
+        Span::styled(tab_files, files_style),
         Span::raw("  "),
         Span::styled(
             format!("⛁ {server_name}"),
@@ -590,14 +602,19 @@ pub fn draw_top_bar(
         ));
     } else if terminal_active {
         let hint = if closed {
-            "  — kabuk kapandı (F1: yeniden aç)"
+            format!("  — kabuk kapandı ({}: yeniden aç)", keys.terminal.label())
         } else {
             "  — sürükle: kopyala · sağ tık/Shift+Ins: yapıştır · tekerlek: geçmiş · çıkış: exit"
+                .to_string()
         };
         spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     } else {
         spans.push(Span::styled(
-            "  — yaz: ara · F5: transfer · F4: düzenle · Esc: temizle/çık",
+            format!(
+                "  — yaz: ara · {}: transfer · {}: düzenle · Esc: temizle/çık",
+                keys.transfer.label(),
+                keys.edit.label()
+            ),
             Style::default().fg(Color::DarkGray),
         ));
     }

@@ -1,4 +1,4 @@
-//! tfs (terminal-file-send) — SSH dosya tarayıcısı (F2) + modern SSH terminali (F1).
+//! tfs (terminal-file-send) — SSH dosya tarayıcısı (Alt+2) + modern SSH terminali (Alt+1).
 //!
 //! Sunucular `config.json` dosyasından okunur (birden fazla sunucu, parolalarıyla).
 //! Açılışta fareyle sunucu seçilir. Config yolu ilk argümanla değiştirilebilir:
@@ -8,6 +8,7 @@
 mod app;
 mod config;
 mod editor;
+mod keys;
 mod picker;
 mod ssh;
 mod terminal;
@@ -70,7 +71,8 @@ impl EventSource {
     }
 }
 
-/// Aktif ekran (mod). F1 → Terminal, F2 → Dosya transferi.
+/// Aktif ekran (mod). Geçiş tuşları `keys.terminal` / `keys.files`
+/// (varsayılan Alt+1 / Alt+2).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
     FileTransfer,
@@ -81,7 +83,7 @@ enum Screen {
 async fn main() -> Result<()> {
     let config_path = std::env::args().nth(1).unwrap_or_else(|| "config.json".into());
     let mut cfg = match Config::load_or_create(&config_path)? {
-        Loaded::Ready(c) => c,
+        Loaded::Ready(c) => *c,
         // Yapılandırma yok ya da hiç doldurulmamış. Eskiden burada şablonun
         // yolunu yazıp çıkıyorduk; artık bağlantı yöneticisi **boş listeyle**
         // açılıyor ve kullanıcı ilk bağlantısını doğrudan arayüzde kuruyor
@@ -89,6 +91,11 @@ async fn main() -> Result<()> {
         // üzerlerine yazılır).
         Loaded::NeedsEditing => Config::default(),
     };
+    // Hatalı kısayol tanımı TUI açılmadan, düz metin hatayla bildirilsin.
+    keys::install(
+        keys::Keymap::from_config(&cfg.keys)
+            .with_context(|| format!("{config_path}: kısayol tanımı hatalı"))?,
+    );
 
     let mut terminal = setup_terminal()?;
     // TUI içindeki tüm akışı sar; hata olsa da terminali geri yükle.
@@ -103,28 +110,61 @@ async fn app_flow(
     cfg: &mut Config,
     config_path: &str,
 ) -> Result<()> {
-    let idx = match picker::run(terminal, &mut cfg.servers, config_path).await? {
-        Some(i) => i,
-        None => return Ok(()), // kullanıcı çıktı
-    };
-    // `idx`, yöneticiden **çıkıldığı andaki** listeye göre; kullanıcı orada
-    // ekleme/silme/sıralama yapmış olabilir, o yüzden indeks ancak burada
-    // çözülür.
-    let sc = &cfg.servers[idx];
+    // Bağlanma başarısız olursa (yanlış parola, ulaşılamayan sunucu, reddedilen
+    // anahtar) programdan çıkmak yerine yöneticiye dönülür: hata durum
+    // satırında, imleç o bağlantının üstünde — düzeltip yeniden denemek tek tuş.
+    let mut notice: Option<String> = None;
+    let mut start: Option<usize> = None;
+    loop {
+        let idx = match picker::run(terminal, &mut cfg.servers, config_path, notice.take(), start)
+            .await?
+        {
+            Some(i) => i,
+            None => return Ok(()), // kullanıcı çıktı
+        };
+        // `idx`, yöneticiden **çıkıldığı andaki** listeye göre; kullanıcı orada
+        // ekleme/silme/sıralama yapmış olabilir, o yüzden indeks ancak burada
+        // çözülür.
+        start = Some(idx);
+        let sc = cfg.servers[idx].clone();
 
+        match connect_and_load(terminal, &sc).await {
+            Ok(Some((ssh, mut app))) => return run(terminal, &mut app, ssh, sc.name).await,
+            // Sunucu anahtarı onaylanmadı — sessizce listeye dön.
+            Ok(None) => {}
+            Err(e) => {
+                // Durum satırı tek satır: çok satırlı hata zincirini düzle.
+                let detay = format!("{e:#}")
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                notice = Some(format!(
+                    "⚠ '{}' bağlanamadı: {detay} — {}: düzenle",
+                    sc.name,
+                    keys::get().edit.label()
+                ));
+            }
+        }
+    }
+}
+
+/// Bağlan + panelleri ilk kez doldur. `Ok(None)` = kullanıcı bilinmeyen
+/// sunucu anahtarını onaylamadı.
+async fn connect_and_load(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    sc: &config::ServerConfig,
+) -> Result<Option<(Arc<Ssh>, App)>> {
     // Sunucu anahtarı bilinmiyorsa kullanıcıya sorup known_hosts'a ekleriz ve
     // bir kez daha deneriz; bu yüzden döngü.
     let ssh = loop {
         terminal.draw(|f| picker::draw_connecting(f, &sc.name))?;
-        let attempt = Ssh::connect(sc)
-            .await
-            .with_context(|| format!("'{}' sunucusuna bağlanılamadı", sc.name))?;
-
-        match attempt {
+        match Ssh::connect(sc).await? {
             ssh::Connected::Ok(s) => break Arc::new(*s),
             ssh::Connected::HostKey(issue) => {
                 if !picker::confirm_host_key(terminal, sc, &issue).await? {
-                    return Ok(());
+                    return Ok(None);
                 }
                 // Yalnızca `Unknown` onaylanabilir (bkz. `confirm_host_key`).
                 if let ssh::HostKeyIssue::Unknown { key, .. } = &issue {
@@ -136,10 +176,9 @@ async fn app_flow(
 
     let mut app = App::new();
     app.load_local(std::env::current_dir()?)?;
-    let home = ssh.home().await?;
-    app.load_remote(&ssh, home).await?;
-
-    run(terminal, &mut app, ssh, sc.name.clone()).await
+    let home = ssh.home().await.context("uzak ev dizini alınamadı")?;
+    app.load_remote(&ssh, home).await.context("uzak dizin listelenemedi")?;
+    Ok(Some((ssh, app)))
 }
 
 async fn run(
@@ -151,7 +190,7 @@ async fn run(
     let mut events = EventSource::new();
     let mut screen = Screen::FileTransfer;
 
-    // Kabuk oturumu ilk F1'de tembel açılır, sonra uygulama boyunca canlı tutulur.
+    // Kabuk oturumu terminal moduna ilk geçişte tembel açılır, sonra uygulama boyunca canlı tutulur.
     // Okuma yarısının alıcısı `term_rx`'te; `select!` bunu dinler.
     let mut term: Option<TermSession> = None;
     let mut term_rx: Option<mpsc::UnboundedReceiver<Vec<u8>>> = None;
@@ -259,27 +298,26 @@ async fn run(
                         if let Some(l) = keylog.as_mut() {
                             l.write(&format!("{ev:?}"));
                         }
-                        // Global mod tuşları (F1/F2) — her iki modda yakalanır, kabuğa iletilmez.
+                        // Global mod tuşları (keys.terminal / keys.files) — her iki
+                        // modda yakalanır, kabuğa iletilmez.
                         if let Event::Key(k) = &ev {
                             if k.kind == KeyEventKind::Press {
-                                match k.code {
-                                    KeyCode::F(1) => {
-                                        screen = Screen::Terminal;
-                                        if term.is_none() {
-                                            pending_open = true;
-                                        }
-                                        continue;
+                                let km = keys::get();
+                                if km.terminal.matches(k) {
+                                    screen = Screen::Terminal;
+                                    if term.is_none() {
+                                        pending_open = true;
                                     }
-                                    KeyCode::F(2) => {
-                                        screen = Screen::FileTransfer;
-                                        continue;
-                                    }
-                                    _ => {}
+                                    continue;
+                                }
+                                if km.files.matches(k) {
+                                    screen = Screen::FileTransfer;
+                                    continue;
                                 }
                             }
                         }
 
-                        // Global fare: üst çubuktaki F1/F2 sekmelerine sol tık → mod değiştir.
+                        // Global fare: üst çubuktaki mod sekmelerine sol tık → mod değiştir.
                         if let Event::Mouse(m) = &ev {
                             if let MouseEventKind::Down(MouseButton::Left) = m.kind {
                                 if let Some(tab) = terminal::hit_tab(m.column, m.row) {

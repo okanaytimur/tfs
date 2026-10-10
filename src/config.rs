@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::keys::KeysConfig;
+
 /// İlk çalıştırmada yazılan şablon. `config.example.json` derleme sırasında
 /// gömülür — böylece `cargo install tfs-ssh` ile kurulan binary'de de vardır
 /// (yanında kaynak dosya olmasa bile) ve şablon örnekle asla ayrışmaz.
@@ -89,13 +91,17 @@ pub fn home_dir() -> Option<PathBuf> {
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Config {
     pub servers: Vec<ServerConfig>,
+    /// Kısayollar (bkz. `keys.rs`). Yazılmazsa varsayılanlar; varsayılanda
+    /// kaldıysa dosyaya da yazılmaz.
+    #[serde(default, skip_serializing_if = "KeysConfig::is_empty")]
+    pub keys: KeysConfig,
 }
 
 /// `load_or_create` sonucu: ya kullanılabilir yapılandırma, ya da henüz
 /// doldurulmamış bir şablon.
 pub enum Loaded {
     /// Gerçek sunucu bilgileri okundu.
-    Ready(Config),
+    Ready(Box<Config>),
     /// Dosya yoktu (şablon yazıldı) ya da vardı ama hâlâ dokunulmamış
     /// şablondu. Çağıran bunu "bağlantı listesi boş" diye ele alır ve
     /// bağlantı yöneticisini boş listeyle açar.
@@ -136,7 +142,7 @@ impl Config {
             serde_json::from_str(&text).with_context(|| format!("{path} JSON hatası"))?;
         // Liste boş olabilir: bağlantı yöneticisi (F5/[+ Yeni]) boş listeyle de
         // açılır, kullanıcı ilk bağlantısını orada kurar.
-        Ok(Loaded::Ready(cfg))
+        Ok(Loaded::Ready(Box::new(cfg)))
     }
 
     /// Yapılandırmayı diske yazar (bağlantı yöneticisi her değişiklikten sonra
@@ -256,6 +262,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         cfg.save(&yol_s).unwrap();
 
@@ -307,5 +314,26 @@ mod tests {
             c.servers.iter().any(|s| s.key.is_some()),
             "şablon anahtarla bağlanma örneğini de göstermeli"
         );
+        // Şablondaki kısayol örneği hem geçerli olmalı hem varsayılanlarla aynı
+        // (şablon "varsayılan budur" diye okunuyor).
+        assert!(!c.keys.is_empty(), "şablon `keys` bölümünü de göstermeli");
+        let m = crate::keys::Keymap::from_config(&c.keys).expect("şablon kısayolları geçerli");
+        let d = crate::keys::Keymap::default();
+        for (a, b) in [
+            (&m.terminal, &d.terminal),
+            (&m.files, &d.files),
+            (&m.transfer, &d.transfer),
+            (&m.edit, &d.edit),
+            (&m.quit, &d.quit),
+            (&m.new, &d.new),
+            (&m.copy, &d.copy),
+            (&m.delete, &d.delete),
+            (&m.move_up, &d.move_up),
+            (&m.move_down, &d.move_down),
+            (&m.save, &d.save),
+            (&m.show_password, &d.show_password),
+        ] {
+            assert_eq!(a.label(), b.label());
+        }
     }
 }

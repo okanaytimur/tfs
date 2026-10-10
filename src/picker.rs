@@ -11,7 +11,7 @@
 //! harici `ssh` istemcisine devretmiyor; parolayı sormak için her seferinde
 //! kullanıcıyı beklemek yerine config'de tutma seçeneği veriliyor. Parola düz
 //! metin saklandığı için dosya Unix'te `0600`'e çekiliyor ve arayüzde
-//! maskeleniyor (F9 ile görünür).
+//! maskeleniyor (`keys.show_password`, varsayılan Alt+P / F9 ile görünür).
 
 use std::io::Stdout;
 
@@ -45,16 +45,29 @@ enum Action {
     MoveDown,
 }
 
-/// Araç çubuğu düğmeleri: etiket, kısayol adı, eylem. Çizim ve tıklama
-/// eşlemesi tek kaynaktan beslensin diye burada duruyor.
-const BUTTONS: [(&str, &str, Action); 6] = [
-    ("+ Yeni", "F5", Action::New),
-    ("Düzenle", "F4", Action::Edit),
-    ("Kopyala", "F6", Action::Copy),
-    ("Sil", "F8", Action::Delete),
-    ("↑", "Alt+↑", Action::MoveUp),
-    ("↓", "Alt+↓", Action::MoveDown),
+/// Araç çubuğu düğmeleri: etiket, eylem. Çizim ve tıklama eşlemesi tek
+/// kaynaktan beslensin diye burada duruyor; kısayol adı `button_key`den gelir.
+const BUTTONS: [(&str, Action); 6] = [
+    ("+ Yeni", Action::New),
+    ("Düzenle", Action::Edit),
+    ("Kopyala", Action::Copy),
+    ("Sil", Action::Delete),
+    ("↑", Action::MoveUp),
+    ("↓", Action::MoveDown),
 ];
+
+/// Düğmede gösterilecek kısayol. Sıralama düğmeleri kısayolsuz çizilir: `Alt+…`
+/// etiketleriyle altı düğme 80 sütuna sığmıyordu; o tuşlar durum satırında.
+fn button_key(a: Action) -> Option<String> {
+    let k = crate::keys::get();
+    match a {
+        Action::New => Some(k.new.label()),
+        Action::Edit => Some(k.edit.label()),
+        Action::Copy => Some(k.copy.label()),
+        Action::Delete => Some(k.delete.label()),
+        Action::MoveUp | Action::MoveDown => None,
+    }
+}
 
 /// Ekranın hangi katmanı açık.
 enum Mode {
@@ -82,6 +95,9 @@ struct Manager<'a> {
     /// En son çizimde düğmelerin nereye düştüğü (fare eşlemesi için).
     buttons: Vec<(Rect, Action)>,
     status: String,
+    /// Önceki bağlanma denemesinin hatası. Durum satırında kırmızı gösterilir,
+    /// ilk tuşta kalkar (`status`un yerine geçmez, üstüne biner).
+    notice: Option<String>,
     mode: Mode,
     /// `true` olunca `run` cikar (kullanici vazgecti).
     quit: bool,
@@ -92,10 +108,16 @@ struct Manager<'a> {
 ///
 /// `servers` **değiştirilebilir**: kullanıcı bu ekranda bağlantı ekleyip
 /// silebildiği için liste (ve dolayısıyla indeksler) çağrı sırasında değişir.
+///
+/// `notice`: bağlanma başarısız olup yöneticiye dönüldüyse hata metni;
+/// `start`: o bağlantının indeksi — imleç onun üstünde açılır ki düzeltmek
+/// tek tuş olsun.
 pub async fn run(
     term: &mut Term,
     servers: &mut Vec<ServerConfig>,
     config_path: &str,
+    notice: Option<String>,
+    start: Option<usize>,
 ) -> Result<Option<usize>> {
     let bos = servers.is_empty();
     let mut m = Manager {
@@ -107,15 +129,29 @@ pub async fn run(
         offset: 0,
         list_area: Rect::default(),
         buttons: Vec::new(),
-        status: if bos {
-            format!("Henüz bağlantı yok — [+ Yeni] (F5) ile ekleyin. Dosya: {config_path}")
-        } else {
-            format!("Enter / tıkla: bağlan · yaz: ara · Esc: çık · {config_path}")
+        status: {
+            let k = crate::keys::get();
+            if bos {
+                format!(
+                    "Henüz bağlantı yok — [+ Yeni] ({}) ile ekleyin. Dosya: {config_path}",
+                    k.new.label()
+                )
+            } else {
+                format!(
+                    "Enter / tıkla: bağlan · yaz: ara · {}/{}: sırala · Esc: çık · {config_path}",
+                    k.move_up.label(),
+                    k.move_down.label()
+                )
+            }
         },
+        notice,
         mode: Mode::List,
         quit: false,
     };
     m.refilter();
+    if let Some(pos) = start.and_then(|i| m.view.iter().position(|&v| v == i)) {
+        m.select(pos);
+    }
 
     let mut events = EventStream::new();
 
@@ -124,6 +160,7 @@ pub async fn run(
 
         match events.next().await {
             Some(Ok(Event::Key(k))) if k.kind == KeyEventKind::Press => {
+                m.notice = None;
                 if let Some(i) = m.on_key(k) {
                     return Ok(Some(i));
                 }
@@ -190,6 +227,8 @@ impl Manager<'_> {
     fn persist(&mut self) {
         let cfg = Config {
             servers: self.servers.clone(),
+            // Bu ekran kısayolları düzenlemiyor; kullanıcının yazdığı hâli koru.
+            keys: crate::keys::get().source.clone(),
         };
         self.status = match cfg.save(self.path) {
             Ok(()) => format!("Kaydedildi → {}", self.path),
@@ -333,12 +372,20 @@ impl Manager<'_> {
     fn list_key(&mut self, k: KeyEvent) -> Option<usize> {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
+        let keys = crate::keys::get();
 
         match k.code {
-            // Çıkış — app.rs ile aynı kurallar: Ctrl+Q / F10, Esc önce aramayı
-            // temizler.
-            KeyCode::Char('q') | KeyCode::Char('Q') if ctrl => self.quit = true,
-            KeyCode::F(10) => self.quit = true,
+            // Çıkış — app.rs ile aynı kurallar: `keys.quit` (varsayılan
+            // Alt+Q / Ctrl+Q / F10), Esc önce aramayı temizler.
+            _ if keys.quit.matches(&k) => self.quit = true,
+            // Değiştirilebilir eylem tuşları (keys.rs) — `Alt+↑` gibi gezinme
+            // tuşlarıyla karışanlar aşağıdaki düz ok tuşlarından önce gelmeli.
+            _ if keys.new.matches(&k) => self.act(Action::New),
+            _ if keys.edit.matches(&k) => self.act(Action::Edit),
+            _ if keys.copy.matches(&k) => self.act(Action::Copy),
+            _ if keys.delete.matches(&k) => self.act(Action::Delete),
+            _ if keys.move_up.matches(&k) => self.act(Action::MoveUp),
+            _ if keys.move_down.matches(&k) => self.act(Action::MoveDown),
             KeyCode::Esc => {
                 if self.query.is_empty() {
                     self.quit = true;
@@ -349,13 +396,6 @@ impl Manager<'_> {
             }
 
             KeyCode::Enter => return self.current(),
-
-            KeyCode::F(5) | KeyCode::Insert => self.act(Action::New),
-            KeyCode::F(4) => self.act(Action::Edit),
-            KeyCode::F(6) => self.act(Action::Copy),
-            KeyCode::F(8) | KeyCode::Delete => self.act(Action::Delete),
-            KeyCode::Up if alt => self.act(Action::MoveUp),
-            KeyCode::Down if alt => self.act(Action::MoveDown),
 
             KeyCode::Backspace => {
                 self.query.pop();
@@ -386,7 +426,9 @@ impl Manager<'_> {
 
     fn form_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = k.modifiers.contains(KeyModifiers::ALT);
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+        let keys = crate::keys::get();
 
         // Formu kapatan tuşlar önce gelir: `self.mode`a dokundukları için
         // formu ödünç almadan ele alınmalılar.
@@ -395,11 +437,11 @@ impl Manager<'_> {
                 self.mode = Mode::List;
                 return;
             }
-            KeyCode::Enter | KeyCode::F(10) => {
+            KeyCode::Enter => {
                 self.commit_form();
                 return;
             }
-            KeyCode::Char('s') if ctrl => {
+            _ if keys.save.matches(&k) => {
                 self.commit_form();
                 return;
             }
@@ -410,7 +452,7 @@ impl Manager<'_> {
             return;
         };
         match k.code {
-            KeyCode::F(9) => f.show_secrets = !f.show_secrets,
+            _ if keys.show_password.matches(&k) => f.show_secrets = !f.show_secrets,
             KeyCode::Tab => {
                 if shift {
                     f.prev_field()
@@ -427,7 +469,10 @@ impl Manager<'_> {
             KeyCode::End => f.cursor = f.value().chars().count(),
             KeyCode::Backspace => f.backspace(),
             KeyCode::Delete => f.delete(),
-            KeyCode::Char(c) if !ctrl => f.insert(c),
+            // Yalnız Ctrl ya da yalnız Alt kısayoldur, alana yazılmaz (Alt+S 's'
+            // eklemesin). İkisi birden = AltGr (Windows böyle raporlar):
+            // Türkçe klavyede `@`, `{`, `[` — parolada olabilir, yazılmalı.
+            KeyCode::Char(c) if ctrl == alt => f.insert(c),
             _ => {}
         }
     }
@@ -541,18 +586,20 @@ impl Manager<'_> {
         self.draw_details(f, cols[1]);
         self.draw_toolbar(f, root[1]);
 
-        let durum = if self.query.is_empty() {
-            format!(" {} ", self.status)
+        let (durum, stil) = if let Some(n) = &self.notice {
+            (
+                format!(" {n} "),
+                Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD),
+            )
+        } else if self.query.is_empty() {
+            (format!(" {} ", self.status), Style::default().fg(Color::Black).bg(Color::Cyan))
         } else {
-            format!(" ara: {}   ({} eşleşme) ", self.query, self.view.len())
-        };
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                durum,
+            (
+                format!(" ara: {}   ({} eşleşme) ", self.query, self.view.len()),
                 Style::default().fg(Color::Black).bg(Color::Cyan),
-            )),
-            root[2],
-        );
+            )
+        };
+        f.render_widget(Paragraph::new(Span::styled(durum, stil)), root[2]);
 
         match &mut self.mode {
             // Form yerleşimi (alan + düğme `Rect`leri) çizim sırasında
@@ -576,9 +623,12 @@ impl Manager<'_> {
 
         if self.view.is_empty() {
             let mesaj = if self.servers.is_empty() {
-                "Henüz bağlantı yok.\n\n[+ Yeni] (F5) ile ilk bağlantınızı ekleyin."
+                format!(
+                    "Henüz bağlantı yok.\n\n[+ Yeni] ({}) ile ilk bağlantınızı ekleyin.",
+                    crate::keys::get().new.label()
+                )
             } else {
-                "Aramaya uyan bağlantı yok.\n\n(Esc: aramayı temizle)"
+                "Aramaya uyan bağlantı yok.\n\n(Esc: aramayı temizle)".to_string()
             };
             f.render_widget(
                 Paragraph::new(mesaj)
@@ -702,8 +752,11 @@ impl Manager<'_> {
             return;
         }
         let mut x = area.x;
-        for (etiket, kisayol, act) in BUTTONS {
-            let metin = format!(" {etiket} ({kisayol}) ");
+        for (etiket, act) in BUTTONS {
+            let metin = match button_key(act) {
+                Some(kisayol) => format!(" {etiket} ({kisayol}) "),
+                None => format!(" {etiket} "),
+            };
             let w = metin.chars().count() as u16;
             if x + w > area.x + area.width {
                 break;
@@ -794,7 +847,7 @@ struct Form {
     cursor: usize,
     /// Değer kutusundan taşan metinde yatay kaydırma (karakter cinsinden).
     scroll: usize,
-    /// Parolalar açık gösteriliyor mu (F9).
+    /// Parolalar açık gösteriliyor mu (`keys.show_password`).
     show_secrets: bool,
     error: Option<String>,
     field_areas: [Rect; FIELDS.len()],
@@ -1051,15 +1104,13 @@ impl Form {
         };
         self.save_area = dugme(f, " Kaydet (Enter) ", Color::Green);
         self.cancel_area = dugme(f, " Vazgeç (Esc) ", Color::Gray);
-        self.reveal_area = dugme(
-            f,
-            if self.show_secrets {
-                " Parolayı gizle (F9) "
-            } else {
-                " Parolayı göster (F9) "
-            },
-            Color::Yellow,
-        );
+        let tus = crate::keys::get().show_password.label();
+        let reveal = if self.show_secrets {
+            format!(" Parolayı gizle ({tus}) ")
+        } else {
+            format!(" Parolayı göster ({tus}) ")
+        };
+        self.reveal_area = dugme(f, &reveal, Color::Yellow);
     }
 }
 
@@ -1328,6 +1379,7 @@ mod tests {
             list_area: Rect::default(),
             buttons: Vec::new(),
             status: String::new(),
+            notice: None,
             mode: Mode::List,
             quit: false,
         };
@@ -1356,6 +1408,8 @@ mod tests {
                     },
                     _ => Mode::List,
                 };
+                // Bağlanma hatasından dönüş: uzun, kırmızı durum satırı.
+                m.notice = Some("⚠ 'Prod Sunucu' bağlanamadı: kimlik doğrulama başarısız".into());
                 let mut t = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
                 t.draw(|f| m.draw(f))
                     .unwrap_or_else(|e| panic!("{w}x{h} kip {kip}: {e}"));

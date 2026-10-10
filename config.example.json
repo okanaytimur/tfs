@@ -19,5 +19,19 @@
       "user": "root",
       "password": "PAROLA_BURAYA"
     }
-  ]
+  ],
+  "keys": {
+    "terminal": "Alt+1",
+    "files": "Alt+2",
+    "transfer": ["Alt+T", "F5"],
+    "edit": ["Alt+E", "F4"],
+    "quit": ["Alt+Q", "Ctrl+Q", "F10"],
+    "new": ["Alt+N", "F5", "Ins"],
+    "copy": ["Alt+C", "F6"],
+    "delete": ["Alt+D", "F8", "Del"],
+    "move_up": "Alt+Up",
+    "move_down": "Alt+Down",
+    "save": ["Alt+S", "Ctrl+S", "F10"],
+    "show_password": ["Alt+P", "F9"]
+  }
 }
