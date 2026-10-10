@@ -483,6 +483,7 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
+> **v0.7.0** (2026-10-11): Alt kısayollar, Rust'sız fresh — `cargo publish` kullanıcıda.
 > **v0.6.0 yayınlandı** (2026-09-15): bağlantı yöneticisi + uygulama ikonu.
 > Adımlar "## 12"deki sıraya göre yapıldı (commit → dry-run → etiket → push →
 > publish + release), yani etiket yayınlanan commit'i gösteriyor.
@@ -686,6 +687,20 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > git ls-remote --tags origin | grep 'vX.Y.Z'
 > ```
 
+### v0.7.0 (2026-10-11)
+
+Alt'lı + değiştirilebilir kısayollar (F1/F2 → Alt+1/Alt+2), Rust'sız fresh
+kurulumu, bağlanma hatasında yöneticiye dönüş. Notlar: `dist/RELEASE-v0.7.0.md`.
+
+- [x] `Cargo.toml` `version = "0.7.0"`, açıklama Alt+1/Alt+2'ye göre güncellendi
+- [x] `cargo test` (58 + 1 ağ testi `#[ignore]`) + `cargo clippy --all-targets` temiz
+- [x] Binary'ler: Windows x86_64 + i686 (MSVC), Linux **`cargo zigbuild`** ile
+      statik musl (Docker'sız — bkz. "## 10.4"). Linux binary'si WSL Ubuntu
+      26.04'te çalıştı, `ldd`: "not a dynamic executable".
+- [x] `cargo publish --dry-run`
+- [x] commit → etiket (`v0.7.0`) → push → `gh release create`
+- [ ] `cargo publish` — kullanıcı çalıştırıyor (token onda)
+
 ### v0.6.0 (2026-09-15) — YAYINDA
 
 Bağlantı yöneticisi (ekle/düzenle/kopyala/sil/sırala + arama, parola alanıyla)
@@ -830,6 +845,25 @@ yazarsa, sonraki Windows derlemesi tüm bağımlılıkları yeniden derler.
 
 Not: binary `strip`lenmemiş (8.5 MB). Küçültmek isterseniz aynı konteynerde
 `strip` çalıştırılabilir; şimdilik hata ayıklaması kolay kalsın diye dokunulmadı.
+
+#### Docker'sız: `cargo zigbuild` (v0.7.0'da kullanıldı)
+
+Docker yoksa Windows'tan doğrudan, zig'i C derleyicisi/bağlayıcısı olarak
+kullanarak (ring'in C kodu için şart):
+
+```powershell
+python -m pip install --user ziglang        # zig; cargo-zigbuild bunu kendisi bulur
+rustup target add x86_64-unknown-linux-musl
+cargo install --locked cargo-zigbuild
+cargo zigbuild --release --target x86_64-unknown-linux-musl --target-dir target\zig
+copy target\zig\x86_64-unknown-linux-musl\release\tfs dist\tfs-vX.Y.Z-linux-x86_64
+```
+
+Çıktı statik ELF (`file`: "statically linked"). `ignoring deprecated linker
+optimization setting '1'` uyarısı zararsız. Ayrı `--target-dir`: Windows
+derlemesiyle aynı `target/release`'i paylaşıp birbirini yeniden derletmesin.
+WSL varsa hızlı duman testi: `wsl -- /mnt/d/.../tfs hatali-keys.json` TUI
+açmadan hata basıp çıkmalı.
 
 #### (arşiv) Linux makinada elle musl
 ```sh
