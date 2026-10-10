@@ -238,6 +238,21 @@ fn normalize(code: KeyCode, mods: KeyModifiers) -> Binding {
     Binding { code, mods }
 }
 
+/// AltGr ile yazılmış bir karakter mi? Öyleyse karakterin kendisi.
+///
+/// Windows AltGr'yi **Ctrl+Alt** olarak bildirir. Türkçe Q klavyede `\ @ [ ]
+/// { } | ~ €` hep AltGr'yle yazılır; bunlar Ctrl kombinasyonu sanılırsa `\`
+/// kabuğa Ctrl+\ (0x1C, ekranda `^\`) olarak gider, `{` ESC'ye dönüşür.
+/// Gerçek Ctrl+Alt+harf/rakam ise karakter olarak harfi/rakamı taşır — AltGr
+/// hiçbir zaman düz ASCII harf ya da rakam üretmez, ayrım buradan yapılır.
+pub fn altgr_char(k: &KeyEvent) -> Option<char> {
+    let ca = KeyModifiers::CONTROL | KeyModifiers::ALT;
+    match k.code {
+        KeyCode::Char(c) if k.modifiers.contains(ca) && !c.is_ascii_alphanumeric() => Some(c),
+        _ => None,
+    }
+}
+
 /// Bir eyleme bağlı tuşlar.
 #[derive(Debug, Clone)]
 pub struct Keys(Vec<Binding>);

@@ -391,8 +391,10 @@ async fn run(
                                             MouseEventKind::Down(MouseButton::Left) if m.row >= 1 => {
                                                 t.sel_start(m.row - 1, m.column);
                                             }
-                                            MouseEventKind::Drag(MouseButton::Left) if m.row >= 1 => {
-                                                t.sel_update(m.row - 1, m.column);
+                                            // Üst çubuğa / alt kenara taşan sürükleme
+                                            // ekranı kaydırır (bkz. `sel_drag`).
+                                            MouseEventKind::Drag(MouseButton::Left) => {
+                                                t.sel_drag(m.row, m.column);
                                             }
                                             MouseEventKind::Up(MouseButton::Left) => {
                                                 t.sel_finish_copy();
@@ -400,11 +402,15 @@ async fn run(
                                             MouseEventKind::Down(MouseButton::Right) => {
                                                 t.paste_from_clipboard().await;
                                             }
+                                            // Seçim kaydırmada korunur; sürükleme
+                                            // sürüyorsa ucu farenin altına uzar.
                                             MouseEventKind::ScrollUp => {
                                                 t.scroll_up(terminal::SCROLL_STEP);
+                                                t.sel_follow(m.row, m.column);
                                             }
                                             MouseEventKind::ScrollDown => {
                                                 t.scroll_down(terminal::SCROLL_STEP);
+                                                t.sel_follow(m.row, m.column);
                                             }
                                             _ => {}
                                         },
@@ -460,6 +466,11 @@ fn is_paste_key(k: &crossterm::event::KeyEvent) -> bool {
 /// Yığın hâlinde gelebilecek "yazılabilir" tuşun ürettiği karakter.
 /// Ctrl/Alt'lı tuşlar, ok tuşları vb. yığına dahil edilmez (yığını bitirirler).
 fn burst_char(k: &crossterm::event::KeyEvent) -> Option<char> {
+    // AltGr karakteri (`\`, `@`, `{` …) yazılabilir sayılır; yoksa yapıştırılan
+    // metindeki ilk `\`te yığın kopardı.
+    if let Some(c) = keys::altgr_char(k) {
+        return Some(c);
+    }
     if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
         return None;
     }

@@ -92,11 +92,86 @@ pub struct TermSession {
     _reader: tokio::task::JoinHandle<()>,
 }
 
-/// Fareyle sürüklenen metin seçimi. Koordinatlar grid'e göre (satır, sütun).
-#[derive(Clone, Copy)]
+/// Fareyle sürüklenen metin seçimi.
+///
+/// Satırlar **ekrana değil metne** göre tutulur: canlı ekranın 0. satırı 0,
+/// kaydırma tamponundakiler negatif (`-1` = canlı ekranın hemen üstü). Ekran
+/// satırı `r`, `n` satır geriye kaydırılmışken `r - n` satırını gösterir. Bu
+/// sayede tekerlekle kaydırınca seçim aynı metnin üstünde kalır; eskiden ekran
+/// koordinatı tutulduğu için kaydırma seçimi silmek zorundaydı.
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Selection {
-    anchor: (u16, u16),
-    head: (u16, u16),
+    anchor: (i64, u16),
+    head: (i64, u16),
+    /// Sol tuş hâlâ basılı (sürükleniyor) — tekerlek seçimi uzatır.
+    dragging: bool,
+}
+
+impl Selection {
+    /// Okuma sırasına göre (baş, son); son sütun **dahil değil**. Sürükleme
+    /// olmadıysa `None`.
+    fn span(&self, cols: u16) -> Option<((i64, u16), (i64, u16))> {
+        if self.anchor == self.head {
+            return None;
+        }
+        let (start, end) = if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        };
+        Some((start, (end.0, (end.1 + 1).min(cols))))
+    }
+}
+
+/// Metin koordinatlı seçimi, `scrolled` satır geride duran görünümde ekran
+/// koordinatına çevirir; ekranın dışında kalan kısım kırpılır. Hiçbir kısmı
+/// görünmüyorsa `None`. Dönüş: (baş_satır, baş_sütun, son_satır, son_sütun_hariç).
+fn visible_span(
+    span: ((i64, u16), (i64, u16)),
+    scrolled: usize,
+    rows: u16,
+    cols: u16,
+) -> Option<(u16, u16, u16, u16)> {
+    let ((sl, sc), (el, ec)) = span;
+    let s = scrolled as i64;
+    let (top, bottom) = (sl + s, el + s);
+    if bottom < 0 || top >= i64::from(rows) {
+        return None;
+    }
+    let (sr, sc) = if top < 0 { (0, 0) } else { (top as u16, sc) };
+    let (er, ec) = if bottom >= i64::from(rows) {
+        (rows - 1, cols)
+    } else {
+        (bottom as u16, ec)
+    };
+    Some((sr, sc, er, ec))
+}
+
+/// Metin koordinatlı aralığın içeriği — ekranın dışında, kaydırma tamponunda
+/// kalan satırlar dahil. Her satırı görünür kılacak kaydırmaya geçip okur,
+/// sonunda kullanıcının görünümünü geri yükler.
+fn text_between(parser: &mut vt100::Parser, span: ((i64, u16), (i64, u16))) -> String {
+    let ((sl, sc), (el, ec)) = span;
+    let (_, cols) = parser.screen().size();
+    let saved = parser.screen().scrollback();
+    let mut out = String::new();
+    for line in sl..=el {
+        // Satır tamponun içindeyse onu ekranın en üstüne getiren kaydırma.
+        let want = if line < 0 { line.unsigned_abs() as usize } else { 0 };
+        parser.set_scrollback(want);
+        if parser.screen().scrollback() != want {
+            continue; // tampondan düşmüş (1000 satırı aşan çıktı)
+        }
+        let r = (line + want as i64) as u16;
+        let c0 = if line == sl { sc } else { 0 };
+        let c1 = if line == el { ec } else { cols };
+        out.push_str(&parser.screen().contents_between(r, c0, r, c1));
+        if line != el && !parser.screen().row_wrapped(r) {
+            out.push('\n');
+        }
+    }
+    parser.set_scrollback(saved);
+    out
 }
 
 impl TermSession {
@@ -157,27 +232,61 @@ impl TermSession {
 
     // --- Fareyle metin seçimi + kopyalama ---
 
+    /// Ekran koordinatını (grid satırı, sütun) metin koordinatına çevirir.
+    fn text_pos(&self, row: u16, col: u16) -> (i64, u16) {
+        let (r, c) = self.clamp(row, col);
+        (i64::from(r) - self.scrollback() as i64, c)
+    }
+
     /// Seçimi başlat (fare sol tuş basıldı). `row`/`col` grid koordinatı.
     pub fn sel_start(&mut self, row: u16, col: u16) {
-        let p = self.clamp(row, col);
-        self.selection = Some(Selection { anchor: p, head: p });
+        let p = self.text_pos(row, col);
+        self.selection = Some(Selection { anchor: p, head: p, dragging: true });
         self.copy_note = None;
     }
 
     /// Seçimi güncelle (fare sürüklendi).
     pub fn sel_update(&mut self, row: u16, col: u16) {
-        let p = self.clamp(row, col);
+        let p = self.text_pos(row, col);
         if let Some(s) = &mut self.selection {
             s.head = p;
+        }
+    }
+
+    /// Sürükleme hareketi. `screen_row` **ekran** satırıdır (0 = üst çubuk).
+    /// Fare terminal alanının üstüne (üst çubuğa) ya da altına taşarsa görünüm
+    /// bir satır kayar ve seçim kenardan devam eder — tekerleğe gerek kalmadan
+    /// ekrandan uzun metin seçilebilsin.
+    pub fn sel_drag(&mut self, screen_row: u16, col: u16) {
+        if !self.selection.is_some_and(|s| s.dragging) {
+            return;
+        }
+        if screen_row == 0 {
+            self.scroll_up(1);
+            self.sel_update(0, col);
+        } else if screen_row > self.rows {
+            self.scroll_down(1);
+            self.sel_update(self.rows.saturating_sub(1), col);
+        } else {
+            self.sel_update(screen_row - 1, col);
+        }
+    }
+
+    /// Tekerlekle kaydırdıktan sonra çağrılır: sürükleme sürüyorsa seçimin
+    /// ucu, farenin altına gelen yeni satıra uzar.
+    pub fn sel_follow(&mut self, screen_row: u16, col: u16) {
+        if self.selection.is_some_and(|s| s.dragging) && screen_row >= 1 {
+            self.sel_update(screen_row - 1, col);
         }
     }
 
     /// Seçimi bitir (fare bırakıldı) ve seçili metni panoya kopyala. Sürükleme
     /// olmadıysa (tek tık) seçim temizlenir, kopyalama yapılmaz.
     pub fn sel_finish_copy(&mut self) {
-        let Some(s) = self.selection else {
+        let Some(s) = self.selection.as_mut() else {
             return;
         };
+        s.dragging = false;
         if s.anchor == s.head {
             self.selection = None;
             return;
@@ -287,11 +396,10 @@ impl TermSession {
         }
     }
 
-    /// Kaydırma konumunu ayarlar. Seçim koordinatları kayacağı için seçim
-    /// temizlenir. `set_scrollback` istenen değeri tampon uzunluğuna kırpar.
+    /// Kaydırma konumunu ayarlar. Seçim metin koordinatlı olduğu için korunur.
+    /// `set_scrollback` istenen değeri tampon uzunluğuna kırpar.
     fn set_scroll(&mut self, target: usize) {
         self.parser.set_scrollback(target);
-        self.selection = None;
         self.copy_note = None;
     }
 
@@ -307,25 +415,15 @@ impl TermSession {
         )
     }
 
-    /// Normalize edilmiş seçim aralığı: (baş_satır, baş_sütun, son_satır,
-    /// son_sütun_dahil). Sürükleme yoksa `None`.
-    fn selection_span(&self) -> Option<(u16, u16, u16, u16)> {
-        let s = self.selection?;
-        if s.anchor == s.head {
-            return None;
-        }
-        let (start, end) = if s.anchor <= s.head {
-            (s.anchor, s.head)
-        } else {
-            (s.head, s.anchor)
-        };
-        let end_col_incl = (end.1 + 1).min(self.cols);
-        Some((start.0, start.1, end.0, end_col_incl))
+    /// Seçimin şu anki görünümde ekrana düşen kısmı (çizim için).
+    fn selection_on_screen(&self) -> Option<(u16, u16, u16, u16)> {
+        let span = self.selection?.span(self.cols)?;
+        visible_span(span, self.scrollback(), self.rows, self.cols)
     }
 
-    fn selected_text(&self) -> String {
-        match self.selection_span() {
-            Some((sr, sc, er, ec)) => self.parser.screen().contents_between(sr, sc, er, ec),
+    fn selected_text(&mut self) -> String {
+        match self.selection.and_then(|s| s.span(self.cols)) {
+            Some(span) => text_between(&mut self.parser, span),
             None => String::new(),
         }
     }
@@ -337,7 +435,18 @@ impl TermSession {
             use std::io::Write;
             let _ = writeln!(f, "{}", bytes.escape_ascii());
         }
+        // Geçmişe bakarken yeni satır gelirse vt100 görünümü sabit tutmak için
+        // kaydırma değerini artırır: her şey bir satır daha geçmişe gitmiştir.
+        // Metin koordinatlı seçim de aynı miktarda kaymalı ki aynı metinde kalsın.
+        let before = self.scrollback();
         self.parser.process(bytes);
+        if before > 0 {
+            let pushed = self.scrollback().saturating_sub(before) as i64;
+            if let Some(s) = self.selection.as_mut() {
+                s.anchor.0 -= pushed;
+                s.head.0 -= pushed;
+            }
+        }
         scan_queries(bytes, self.parser.screen(), &mut self.pending_reply);
     }
 
@@ -438,6 +547,12 @@ fn scan_queries(bytes: &[u8], screen: &vt100::Screen, out: &mut Vec<u8>) {
 /// crossterm `KeyEvent` → kabuğa gönderilecek ANSI baytları.
 /// `None` = iletilmeyecek tuş.
 fn encode_key(key: &KeyEvent) -> Option<Vec<u8>> {
+    // AltGr (Windows'ta Ctrl+Alt) ile yazılan `\ @ { } [ ] | ~` → karakterin
+    // kendisi; Ctrl kombinasyonu sanılırsa `\` Ctrl+\ olarak gidiyordu.
+    if let Some(c) = crate::keys::altgr_char(key) {
+        let mut buf = [0u8; 4];
+        return Some(c.encode_utf8(&mut buf).as_bytes().to_vec());
+    }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
 
@@ -529,7 +644,7 @@ pub fn draw(f: &mut Frame, sess: &TermSession, server_name: &str) {
     f.render_widget(pt, root[1]);
 
     // Seçim vurgusu: sözde-terminal çizildikten sonra buffer üzerine REVERSED uygula.
-    if let Some((sr, sc, er, ec)) = sess.selection_span() {
+    if let Some((sr, sc, er, ec)) = sess.selection_on_screen() {
         highlight_selection(f, root[1], sr, sc, er, ec);
     }
 }
@@ -621,4 +736,127 @@ pub fn draw_top_bar(
 
     let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::Reset));
     f.render_widget(bar, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 10x20'lik ekrana "satır 0" … "satır 99" yazılmış parser. Canlı ekranın
+    /// 0. satırı "satır 91", 8. satırı "satır 99", 9. satırı (imleç) boş; gerisi
+    /// kaydırma tamponunda.
+    fn dolu_parser() -> vt100::Parser {
+        let mut p = vt100::Parser::new(10, 20, SCROLLBACK);
+        for i in 0..100 {
+            p.process(format!("satır {i}\r\n").as_bytes());
+        }
+        p
+    }
+
+    /// Ekran satırı `r`, `scrolled` geride → metin satırı (TermSession::text_pos).
+    fn metin(r: u16, scrolled: usize) -> i64 {
+        i64::from(r) - scrolled as i64
+    }
+
+    #[test]
+    fn secim_kaydirinca_ayni_metinde_kalir() {
+        let mut p = dolu_parser();
+        // Canlı ekranda 1. satırı (satır 92) seç.
+        let sel = Selection { anchor: (metin(1, 0), 0), head: (metin(1, 0), 7), dragging: false };
+        let span = sel.span(20).unwrap();
+        assert_eq!(text_between(&mut p, span), "satır 92");
+
+        // 3 satır geri kaydır: seçim ekranda 4. satıra inmeli, metin aynı.
+        p.set_scrollback(3);
+        assert_eq!(visible_span(span, 3, 10, 20), Some((4, 0, 4, 8)));
+        assert_eq!(text_between(&mut p, span), "satır 92");
+        assert_eq!(p.screen().scrollback(), 3, "okuma görünümü geri yüklemeli");
+    }
+
+    /// Ekrandan uzun seçim: canlı ekranda başlayıp tekerlekle geçmişe uzatılmış.
+    #[test]
+    fn ekran_disina_tasan_secim_tamamen_kopyalanir() {
+        let mut p = dolu_parser();
+        // Baş: canlı ekranın 1. satırı (satır 92) sonu; uç: 25 satır geride
+        // ekranın 0. satırı (satır 66) başı — ekran yüksekliğinden çok geride.
+        let sel = Selection {
+            anchor: (metin(1, 0), 19),
+            head: (metin(0, 25), 0),
+            dragging: true,
+        };
+        let span = sel.span(20).unwrap();
+        let metin: String = text_between(&mut p, span);
+        let beklenen: Vec<String> = (66..=92).map(|i| format!("satır {i}")).collect();
+        assert_eq!(metin, beklenen.join("\n"));
+        assert_eq!(p.screen().scrollback(), 0);
+
+        // Canlı görünümde yalnızca görünen kısım çizilir: ekranın üstünden 1. satıra kadar.
+        assert_eq!(visible_span(span, 0, 10, 20), Some((0, 0, 1, 20)));
+        // Tamamen ekran dışında kalan seçim çizilmez.
+        let uzak = Selection { anchor: (-50, 0), head: (-40, 3), dragging: false };
+        assert_eq!(visible_span(uzak.span(20).unwrap(), 0, 10, 20), None);
+    }
+
+    /// Geçmişe bakarken yeni çıktı gelince vt100 görünümü sabit tutar; seçimin
+    /// metin koordinatı da aynı miktarda kaymalı (TermSession::feed).
+    #[test]
+    fn geride_iken_yeni_cikti_secimi_kaydirir() {
+        let mut p = dolu_parser();
+        p.set_scrollback(5);
+        let once = p.screen().scrollback();
+        p.process(b"yeni 1\r\nyeni 2\r\n");
+        let itilen = (p.screen().scrollback() - once) as i64;
+        assert_eq!(itilen, 2);
+        // Ekran satırı 0 (5 geride) "satır 86" idi; seçim kaydırılınca hâlâ o.
+        let sel = Selection {
+            anchor: (metin(0, 5) - itilen, 0),
+            head: (metin(0, 5) - itilen, 7),
+            dragging: false,
+        };
+        assert_eq!(text_between(&mut p, sel.span(20).unwrap()), "satır 86");
+    }
+
+    #[test]
+    fn tek_tik_secim_sayilmaz() {
+        let s = Selection { anchor: (3, 4), head: (3, 4), dragging: true };
+        assert_eq!(s.span(20), None);
+    }
+
+    fn tus(c: char, m: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), m)
+    }
+
+    /// Türkçe Q'da AltGr ile yazılanlar: Windows bunları Ctrl+Alt diye bildirir.
+    /// Karakterin kendisi gitmeli (eskiden `\` → Ctrl+\ → ekranda `^\`).
+    #[test]
+    fn altgr_karakterleri_oldugu_gibi_gider() {
+        let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        for c in ['\\', '@', '{', '}', '[', ']', '|', '~', '€', '<', '>'] {
+            let mut b = [0u8; 4];
+            assert_eq!(
+                encode_key(&tus(c, altgr)).as_deref(),
+                Some(c.encode_utf8(&mut b).as_bytes()),
+                "AltGr+{c}"
+            );
+        }
+    }
+
+    /// Gerçek Ctrl / Ctrl+Alt kombinasyonları bozulmamalı.
+    #[test]
+    fn gercek_ctrl_kombinasyonlari_korunur() {
+        assert_eq!(encode_key(&tus('c', KeyModifiers::CONTROL)), Some(vec![0x03]));
+        // Yalnız Ctrl+\ (SIGQUIT) hâlâ kontrol baytı.
+        assert_eq!(encode_key(&tus('\\', KeyModifiers::CONTROL)), Some(vec![0x1c]));
+        // Ctrl+Alt+harf → ESC + kontrol baytı (emacs/readline).
+        let ca = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        assert_eq!(encode_key(&tus('a', ca)), Some(vec![0x1b, 0x01]));
+    }
+
+    #[test]
+    fn turkce_harfler_utf8_gider() {
+        for (c, b) in [('ş', &b"\xc5\x9f"[..]), ('ı', b"\xc4\xb1"), ('İ', b"\xc4\xb0"), ('ğ', b"\xc4\x9f")] {
+            assert_eq!(encode_key(&tus(c, KeyModifiers::NONE)).as_deref(), Some(b));
+            assert_eq!(encode_key(&tus(c, KeyModifiers::SHIFT)).as_deref(), Some(b));
+        }
+    }
 }

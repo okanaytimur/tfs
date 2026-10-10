@@ -488,7 +488,7 @@ impl App {
             }
             // Yazılabilir karakter → sorguya ekle. Ctrl/Alt'lı olanlar kısayol
             // olabileceği için dışarıda bırakılır.
-            KeyCode::Char(c) if !ctrl && !alt => {
+            KeyCode::Char(c) if (!ctrl && !alt) || crate::keys::altgr_char(&k).is_some() => {
                 let p = self.panel_mut(self.focus);
                 p.query.push(c);
                 p.refilter();

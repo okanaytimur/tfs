@@ -70,3 +70,11 @@ sha2 = "0.11"
 # `test-util` (sanal zaman / start_paused) `full` içinde yok; yapıştırma yığını
 # testleri zamanlayıcıyı gerçek zamanda beklemeden ilerletmek için kullanıyor.
 tokio = { version = "1", features = ["test-util"] }
+
+# vt100 0.15'in `Grid::visible_rows`'u `rows_len - scrollback_offset` hesaplıyor;
+# ekran yüksekliğinden fazla geri kaydırınca bu eksiye düşer. Release'te taşma
+# kontrolü kapalı olduğundan sayı sarar ve `take(çok büyük)` doğru sonucu verir;
+# debug/test derlemesinde ise panikler. vt100'ü yükseltemiyoruz (bkz. yukarıdaki
+# unicode-width notu), o yüzden debug'da da release ile aynı davranış.
+[profile.dev.package.vt100]
+overflow-checks = false

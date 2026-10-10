@@ -402,7 +402,7 @@ impl Manager<'_> {
                 self.refilter();
             }
             // Yazılabilir karakter → arama. Ctrl/Alt'lılar kısayol olabilir.
-            KeyCode::Char(c) if !ctrl && !alt => {
+            KeyCode::Char(c) if (!ctrl && !alt) || crate::keys::altgr_char(&k).is_some() => {
                 self.query.push(c);
                 self.refilter();
             }
