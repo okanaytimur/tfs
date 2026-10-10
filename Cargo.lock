@@ -2257,6 +2257,7 @@ dependencies = [
  "russh-sftp",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tui-term",
  "vt100",

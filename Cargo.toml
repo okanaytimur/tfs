@@ -62,6 +62,9 @@ vt100 = "=0.15.2"
 # çektiği için kapalı; sadece metin panosu gerekiyor. wayland-data-control Linux
 # Wayland desteği içindir (Windows'ta unix-gated olduğu için etkisiz).
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+# İndirilen hazır `fresh` arşivini yayınlanan SHA-256 ile doğrulamak için.
+# russh zaten aynı sürümü çekiyor — yeni bir şey derlenmiyor.
+sha2 = "0.11"
 
 [dev-dependencies]
 # `test-util` (sanal zaman / start_paused) `full` içinde yok; yapıştırma yığını

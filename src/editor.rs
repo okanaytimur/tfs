@@ -53,10 +53,24 @@ pub fn locate() -> Option<PathBuf> {
     if let Some(home) = home_dir() {
         dirs.push(home.join(".local").join("bin"));
     }
+    if let Some(d) = install_dir() {
+        dirs.push(d);
+    }
 
     dirs.into_iter()
         .map(|d| d.join(exe))
         .find(|p| is_executable(p))
+}
+
+/// Hazır binary'nin kurulduğu dizin: Windows'ta `%LOCALAPPDATA%\tfs\bin`
+/// (yönetici hakkı istemez, PATH'e eklemek gerekmez — `locate` oraya da
+/// bakar), diğerlerinde `~/.local/bin` (çoğu dağıtımda zaten PATH'te).
+fn install_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("tfs").join("bin"))
+    } else {
+        home_dir().map(|h| h.join(".local").join("bin"))
+    }
 }
 
 /// `cargo binstall` mevcut mu? (Kurulum planını bu belirler.)
@@ -188,39 +202,66 @@ pub enum Installed {
     Failed(String),
 }
 
-/// Kullanıcıya gösterilecek kurulum planı (onay kutusunda yazar).
+/// Kullanıcıya gösterilecek kurulum planı (onay kutusunda yazar). Boşsa
+/// kurmanın bir yolu yok.
 pub fn install_plan() -> Vec<String> {
-    if has_cargo_binstall() {
-        vec![format!("cargo binstall --no-confirm {CRATE}")]
-    } else if has_cargo() {
-        vec![
-            "cargo install cargo-binstall".into(),
-            format!("cargo binstall --no-confirm {CRATE}"),
-            format!("(gerekirse) cargo install --locked {CRATE}"),
-        ]
-    } else {
-        vec![]
+    let mut plan = Vec::new();
+    if let (Some(asset), Some(_), Some(dir)) = (prebuilt_asset(), download_tools(), install_dir()) {
+        plan.push(format!("GitHub'dan hazır binary indir: {asset}"));
+        plan.push(format!("  → {}", dir.display()));
     }
+    let yedek = if plan.is_empty() { "" } else { "(olmazsa) " };
+    if has_cargo_binstall() {
+        plan.push(format!("{yedek}$ cargo binstall --no-confirm {CRATE}"));
+    } else if has_cargo() {
+        plan.push(format!("{yedek}$ cargo install cargo-binstall"));
+        plan.push(format!("{yedek}$ cargo binstall --no-confirm {CRATE}"));
+        plan.push(format!("{yedek}$ cargo install --locked {CRATE}"));
+    }
+    plan
 }
 
 /// `fresh`i kurar. TUI askıya alınır, komutların çıktısı doğrudan terminalde
-/// görünür (kurulum uzun sürebilir, kullanıcı ilerlemeyi görmeli).
+/// görünür (kullanıcı ilerlemeyi görmeli).
 ///
-/// Sıra: `cargo binstall` (hazır binary — hızlı) → yoksa önce `cargo-binstall`
-/// kurulur → o da olmazsa son çare kaynaktan `cargo install --locked`.
+/// Sıra: **GitHub'daki hazır binary** (Rust gerekmez, saniyeler sürer) → o
+/// olmazsa ve cargo varsa `cargo binstall` → son çare kaynaktan
+/// `cargo install --locked`.
 pub async fn install(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     events: &mut EventSource,
 ) -> Result<Installed> {
-    let Some(cargo) = which("cargo") else {
-        return Ok(Installed::Failed(
-            "cargo bulunamadı — Rust kurulu değil (https://rustup.rs)".into(),
-        ));
+    let prebuilt = match (prebuilt_asset(), download_tools(), install_dir()) {
+        (Some(asset), Some(tools), Some(dir)) => Some((asset, tools, dir)),
+        _ => None,
     };
+    let cargo = which("cargo");
+    if prebuilt.is_none() && cargo.is_none() {
+        return Ok(Installed::Failed(
+            "bu platform için hazır binary yok (ya da curl/tar bulunamadı) ve cargo da \
+             yok — Rust kurun: https://rustup.rs"
+                .into(),
+        ));
+    }
 
     suspend(terminal, events)?;
+    println!("\n── {CRATE} kuruluyor ──\n");
 
-    let outcome = install_steps(&cargo).await;
+    let mut outcome = Err(anyhow::anyhow!("kurulum denenmedi"));
+    if let Some((asset, tools, dir)) = &prebuilt {
+        outcome = install_prebuilt(asset, tools, dir).await;
+        if let Err(e) = &outcome {
+            println!("\n✗ Hazır binary kurulamadı: {e:#}");
+        }
+    }
+    if outcome.is_err() {
+        if let Some(cargo) = &cargo {
+            if prebuilt.is_some() {
+                println!("\ncargo ile deneniyor…\n");
+            }
+            outcome = install_steps(cargo).await;
+        }
+    }
 
     match &outcome {
         Ok(()) => println!("\n✓ {CRATE} kuruldu."),
@@ -240,8 +281,6 @@ pub async fn install(
 
 /// Kurulum adımları (TUI zaten askıda, çıktı doğrudan terminale gider).
 async fn install_steps(cargo: &Path) -> Result<()> {
-    println!("\n── {CRATE} kuruluyor ──\n");
-
     if !has_cargo_binstall() {
         println!("$ cargo install cargo-binstall");
         // Başarısız olursa ölümcül değil: aşağıda kaynaktan kuruluma düşeriz.
@@ -275,6 +314,171 @@ where
         bail!("komut {status} ile bitti");
     }
     Ok(())
+}
+
+// --- Hazır binary (Rust gerekmez) ---
+
+/// fresh'in GitHub sürümleri. `latest/download/<ad>` en son sürümün aynı adlı
+/// dosyasına yönlenir; arşiv adları sürüm numarası taşımıyor, yani tfs'i her
+/// fresh sürümünde güncellemek gerekmiyor.
+const RELEASES: &str = "https://github.com/sinelaw/fresh/releases/latest/download";
+
+/// İndirme/açma araçları: (`curl`, `tar`).
+#[derive(Debug)]
+pub struct Tools {
+    curl: PathBuf,
+    tar: PathBuf,
+}
+
+/// Bu makina için fresh'in yayınladığı arşivin adı (`None` = yayınlanmıyor).
+///
+/// Linux'ta **musl** (statik — glibc sürümü fark etmez) ve `.tar.gz` seçilir:
+/// GNU tar `.xz`'i ancak `xz` kuruluysa açar, gzip ise her yerde var. macOS'ta
+/// yalnızca `.tar.xz` var, ama oradaki bsdtar onu kendisi açar.
+fn prebuilt_asset() -> Option<&'static str> {
+    Some(match (std::env::consts::OS, machine_arch()?) {
+        ("windows", "x86_64") => "fresh-editor-x86_64-pc-windows-msvc.zip",
+        ("windows", "aarch64") => "fresh-editor-aarch64-pc-windows-msvc.zip",
+        ("linux", "x86_64") => "fresh-editor-x86_64-unknown-linux-musl.tar.gz",
+        ("linux", "aarch64") => "fresh-editor-aarch64-unknown-linux-musl.tar.gz",
+        ("macos", "x86_64") => "fresh-editor-x86_64-apple-darwin.tar.xz",
+        ("macos", "aarch64") => "fresh-editor-aarch64-apple-darwin.tar.xz",
+        ("freebsd", "x86_64") => "fresh-editor-x86_64-unknown-freebsd.tar.xz",
+        _ => return None,
+    })
+}
+
+/// Makinanın mimarisi — tfs'in derlendiği mimari değil. 32-bit `tfs.exe`
+/// 64-bit Windows'ta da çalışır ve orada 64-bit fresh kurulabilir; WOW64
+/// altında gerçek mimari `PROCESSOR_ARCHITEW6432`'dedir.
+fn machine_arch() -> Option<&'static str> {
+    if cfg!(windows) {
+        let a = std::env::var("PROCESSOR_ARCHITEW6432")
+            .or_else(|_| std::env::var("PROCESSOR_ARCHITECTURE"))
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        return match a.as_str() {
+            "AMD64" => Some("x86_64"),
+            "ARM64" => Some("aarch64"),
+            _ => None, // gerçekten 32-bit Windows: fresh yayınlamıyor
+        };
+    }
+    match std::env::consts::ARCH {
+        "x86_64" => Some("x86_64"),
+        "aarch64" => Some("aarch64"),
+        _ => None,
+    }
+}
+
+/// `curl` ve `tar` var mı? İkisi de Windows 10 (1803+) ile birlikte gelir,
+/// Linux/macOS'ta da hemen her zaman kurulu.
+///
+/// Windows'ta `tar` **mutlaka** `System32\tar.exe` (bsdtar) olmalı: PATH'te
+/// önde duran Git'in GNU tar'ı zip açamaz ("This does not look like a tar
+/// archive").
+fn download_tools() -> Option<Tools> {
+    let tar = if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        Some(PathBuf::from(root).join("System32").join("tar.exe")).filter(|p| p.is_file())
+    } else {
+        which("tar")
+    }?;
+    Some(Tools { curl: which("curl")?, tar })
+}
+
+/// Hazır arşivi indirir, SHA-256'sını doğrular, açar ve `fresh`i `dir`e
+/// kopyalar. Çıktı doğrudan terminale gider (TUI askıda).
+async fn install_prebuilt(asset: &str, tools: &Tools, dir: &Path) -> Result<()> {
+    let work = temp_file_for("indirme")?
+        .parent()
+        .map(Path::to_path_buf)
+        .context("geçici dizin")?;
+    let r = install_prebuilt_in(asset, tools, dir, &work).await;
+    let _ = std::fs::remove_dir_all(&work);
+    r
+}
+
+async fn install_prebuilt_in(asset: &str, tools: &Tools, dir: &Path, work: &Path) -> Result<()> {
+    let archive = work.join(asset);
+    let sum_file = work.join(format!("{asset}.sha256"));
+    let url = format!("{RELEASES}/{asset}");
+
+    println!("$ curl -L {url}");
+    // -f: HTTP hatası (404) dosyaya HTML yazmak yerine hata olsun.
+    run(&tools.curl, [OsStr::new("-fL"), OsStr::new("--progress-bar"), OsStr::new("-o"),
+        archive.as_os_str(), OsStr::new(&url)])
+    .await
+    .context("indirilemedi")?;
+    run(&tools.curl, [OsStr::new("-fsSL"), OsStr::new("-o"), sum_file.as_os_str(),
+        OsStr::new(&format!("{url}.sha256"))])
+    .await
+    .context("SHA-256 dosyası indirilemedi")?;
+
+    let beklenen = parse_sha256_file(&std::fs::read_to_string(&sum_file)?)
+        .context("SHA-256 dosyası okunamadı")?;
+    let gercek = file_sha256(&archive)?;
+    if beklenen != gercek {
+        bail!("SHA-256 tutmuyor (beklenen {beklenen}, inen {gercek}) — dosya bozuk inmiş");
+    }
+    println!("✓ SHA-256 doğrulandı");
+
+    let x = work.join("x");
+    std::fs::create_dir(&x)?;
+    run(&tools.tar, [OsStr::new("-xf"), archive.as_os_str(), OsStr::new("-C"), x.as_os_str()])
+        .await
+        .context("arşiv açılamadı")?;
+
+    let exe = if cfg!(windows) { "fresh.exe" } else { BIN };
+    let src = find_file(&x, exe).with_context(|| format!("arşivde {exe} yok"))?;
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("dizin oluşturulamadı: {}", dir.display()))?;
+    let dst = dir.join(exe);
+    std::fs::copy(&src, &dst).with_context(|| format!("kopyalanamadı: {}", dst.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o755))?;
+    }
+    println!("✓ {}", dst.display());
+    Ok(())
+}
+
+/// `<hex>  <dosya adı>` biçimindeki `.sha256` dosyasından özeti alır.
+fn parse_sha256_file(s: &str) -> Option<String> {
+    let h = s.split_whitespace().next()?.to_ascii_lowercase();
+    (h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit())).then_some(h)
+}
+
+fn file_sha256(p: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut f = std::fs::File::open(p)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// `root` altında (alt dizinler dahil) adı `name` olan ilk dosya. Linux
+/// arşivi her şeyi bir alt dizine koyuyor, Windows zip'i köke.
+fn find_file(root: &Path, name: &str) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).ok()?.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if e.file_name() == name {
+                return Some(p);
+            }
+        }
+    }
+    None
 }
 
 // --- Editörü açma ---
@@ -392,7 +596,8 @@ pub fn draw_install_prompt(f: &mut Frame, plan: &[String]) {
 
     if plan.is_empty() {
         lines.push(Line::from(
-            "cargo da bulunamadı — önce Rust kurun: https://rustup.rs",
+            "Bu platform için hazır binary yok (ya da curl/tar bulunamadı) ve cargo \
+             da yok — önce Rust kurun: https://rustup.rs",
         ));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -400,16 +605,16 @@ pub fn draw_install_prompt(f: &mut Frame, plan: &[String]) {
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        lines.push(Line::from("Şimdi kurulsun mu? Çalıştırılacak:"));
-        for cmd in plan {
+        lines.push(Line::from("Şimdi kurulsun mu? Yapılacak:"));
+        for adim in plan {
             lines.push(Line::from(Span::styled(
-                format!("  $ {cmd}"),
+                format!("  {adim}"),
                 Style::default().fg(Color::LightCyan),
             )));
         }
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "Kurulum birkaç dakika sürebilir; ilerleme ekranda görünür.",
+            "İlerleme ekranda görünür (cargo ile derleme dakikalar sürebilir).",
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(""));
@@ -510,6 +715,67 @@ mod tests {
         assert_eq!(a, content_hash(&p).unwrap(), "aynı içerik → aynı özet");
         std::fs::write(&p, b"merhabb").unwrap();
         assert_ne!(a, content_hash(&p).unwrap());
+        cleanup_temp(&p);
+    }
+
+    #[test]
+    fn sha256_bilinen_deger() {
+        let p = temp_file_for("ozet.txt").unwrap();
+        std::fs::write(&p, b"abc").unwrap();
+        assert_eq!(
+            file_sha256(&p).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        cleanup_temp(&p);
+    }
+
+    #[test]
+    fn sha256_dosyasi_okunur() {
+        let h = "B373B4D767038BCFB59D66CFC6F9B04E7843EF33F732457E947C4E27CB7F1CE4";
+        assert_eq!(
+            parse_sha256_file(&format!("{h}  fresh-editor-x86_64-pc-windows-msvc.zip\n")),
+            Some(h.to_ascii_lowercase())
+        );
+        assert_eq!(parse_sha256_file(""), None);
+        assert_eq!(parse_sha256_file("<html>Not Found</html>"), None);
+    }
+
+    /// Linux arşivi binary'yi alt dizine koyuyor; derinde de bulunmalı.
+    #[test]
+    fn arsivde_binary_bulunur() {
+        let p = temp_file_for("x").unwrap();
+        let kok = p.parent().unwrap();
+        let alt = kok.join("fresh-editor-x86_64-unknown-linux-musl");
+        std::fs::create_dir_all(alt.join("icons")).unwrap();
+        std::fs::write(alt.join("icons").join("fresh.png"), b"").unwrap();
+        std::fs::write(alt.join("fresh"), b"").unwrap();
+        assert_eq!(find_file(kok, "fresh"), Some(alt.join("fresh")));
+        assert_eq!(find_file(kok, "yok"), None);
+        cleanup_temp(&p);
+    }
+
+    /// Bu testin koştuğu makinalar (Windows/Linux x86_64) için arşiv var.
+    #[test]
+    fn bu_makina_icin_hazir_arsiv_var() {
+        if cfg!(any(windows, target_os = "linux")) && cfg!(target_arch = "x86_64") {
+            assert!(prebuilt_asset().is_some());
+        }
+    }
+
+    /// Ağ gerektirir: `cargo test hazir_binary -- --ignored --nocapture`.
+    /// Gerçek arşivi geçici bir dizine kurar ve çalıştırır.
+    #[tokio::test]
+    #[ignore]
+    async fn hazir_binary_uctan_uca() {
+        let asset = prebuilt_asset().expect("bu platform için arşiv");
+        let tools = download_tools().expect("curl + tar");
+        let p = temp_file_for("kurulum").unwrap();
+        let dir = p.parent().unwrap().join("bin");
+        install_prebuilt(asset, &tools, &dir).await.unwrap();
+        let exe = dir.join(if cfg!(windows) { "fresh.exe" } else { BIN });
+        let out = std::process::Command::new(&exe).arg("--version").output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        eprintln!("{}", String::from_utf8_lossy(&out.stdout).trim());
         cleanup_temp(&p);
     }
 }
