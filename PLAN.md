@@ -483,7 +483,8 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> **v0.7.0** (2026-10-11): Alt kısayollar, Rust'sız fresh — `cargo publish` kullanıcıda.
+> **v0.7.1** (2026-10-11): AltGr + seçim düzeltmeleri — `cargo publish` kullanıcıda.
+> **v0.7.0 yayınlandı** (2026-10-11): Alt kısayollar, Rust'sız fresh.
 > **v0.6.0 yayınlandı** (2026-09-15): bağlantı yöneticisi + uygulama ikonu.
 > Adımlar "## 12"deki sıraya göre yapıldı (commit → dry-run → etiket → push →
 > publish + release), yani etiket yayınlanan commit'i gösteriyor.
@@ -687,6 +688,27 @@ cargo +nightly build --release -Z build-std --target x86_64-win7-windows-msvc
 > git ls-remote --tags origin | grep 'vX.Y.Z'
 > ```
 
+### v0.7.1 (2026-10-11) — hata düzeltme
+
+AltGr karakterleri (`\ @ { } [ ] | ~`, Windows'ta Ctrl+Alt diye geliyor) ve
+tekerlekle kaydırınca kaybolan seçim. Notlar: `dist/RELEASE-v0.7.1.md`.
+
+- Seçim artık metin koordinatlı (`terminal::Selection`, canlı ekrana göre
+  satır; geçmiş negatif). `text_between` ekran dışı satırları
+  `set_scrollback` ile gezip okur. Bilinen sınır: canlı görünümdeyken (geri
+  kaydırılmamış) yeni çıktı akarsa seçim yine kayabilir — satır sayacı yok.
+- 🐞 vt100 0.15 `visible_rows`: offset > ekran yüksekliği → `usize` taşması.
+  Release'te sarıp doğru çalışıyor, debug'da panik. `[profile.dev.package.vt100]
+  overflow-checks = false` (Cargo.toml'da gerekçesiyle).
+- Türkçe karakterler `sampas` (Windows OpenSSH, cmd.exe) üzerinde ölçüldü:
+  `şçıİ` UTF-8 olarak doğru gidip geliyor. tfs `LANG` göndermiyor; Linux
+  sunucuda locale UTF-8 değilse sorun olabilir → gerekirse sunucu başına
+  isteğe bağlı `env` alanı (`channel.set_env`, AcceptEnv LANG LC_*).
+- Binary'ler `--target-dir target\dist` ile derlendi (açık `tfs.exe`
+  `target/release`'i kilitliyordu).
+- [x] test 65 + clippy temiz · üç binary · dry-run · etiket · push · release
+- [ ] `cargo publish` — kullanıcı
+
 ### v0.7.0 (2026-10-11)
 
 Alt'lı + değiştirilebilir kısayollar (F1/F2 → Alt+1/Alt+2), Rust'sız fresh
@@ -699,7 +721,7 @@ kurulumu, bağlanma hatasında yöneticiye dönüş. Notlar: `dist/RELEASE-v0.7.
       26.04'te çalıştı, `ldd`: "not a dynamic executable".
 - [x] `cargo publish --dry-run`
 - [x] commit → etiket (`v0.7.0`) → push → `gh release create`
-- [ ] `cargo publish` — kullanıcı çalıştırıyor (token onda)
+- [x] `cargo publish` — kullanıcı çalıştırdı; crates.io `13a5006`ten (doğrulandı)
 
 ### v0.6.0 (2026-09-15) — YAYINDA
 
