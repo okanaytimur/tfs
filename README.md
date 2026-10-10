@@ -9,10 +9,10 @@
 *🇬🇧 [English summary](#english) · `cargo install tfs-ssh`*
 
 ratatui + russh + russh-sftp ile:
-- **F2** — iki panelli (YEREL ↔ UZAK) SFTP dosya **ve klasör** transferi:
+- **Alt+2** — iki panelli (YEREL ↔ UZAK) SFTP dosya **ve klasör** transferi:
   `t` ile ya da fareyle sürükle-bırak,
-- **F1** — PuTTY / Windows Terminal benzeri, tam ekran interaktif SSH terminali,
-- **F4** — seçili dosyayı [`fresh`](https://github.com/sinelaw/fresh) editöründe aç
+- **Alt+1** — PuTTY / Windows Terminal benzeri, tam ekran interaktif SSH terminali,
+- **Alt+E** / **F4** — seçili dosyayı [`fresh`](https://github.com/sinelaw/fresh) editöründe aç
   (uzak dosya: indir → düzenle → otomatik geri yükle),
 
 hepsi tek SSH bağlantısı üzerinden (yeniden bağlanma yok).
@@ -129,6 +129,88 @@ okunamadı / sunucu kabul etmedi / parola reddedildi).
   (`.gitignore`'a ekli). Parola yerine anahtar kullanmak daha güvenlidir —
   `key` verip `password` alanını hiç yazmayabilirsiniz.
 
+### Kısayolları değiştirme
+
+Tüm ana kısayollar `config.json`'daki `"keys"` bölümünden değiştirilir.
+Bölüm (ya da içindeki bir satır) yazılmazsa varsayılan geçerlidir.
+Varsayılanlar **önce `Alt+…`** (ekranda o gösterilir), ardından alışkanlık
+olan F-tuşu — ikisi de çalışır:
+
+```json
+{
+  "servers": [ ... ],
+  "keys": {
+    "terminal": "Alt+1",
+    "files":    "Alt+2",
+    "transfer": ["Alt+T", "F5"],
+    "edit":     ["Alt+E", "F4"],
+    "quit":     ["Alt+Q", "Ctrl+Q", "F10"],
+
+    "new":      ["Alt+N", "F5", "Ins"],
+    "copy":     ["Alt+C", "F6"],
+    "delete":   ["Alt+D", "F8", "Del"],
+    "move_up":   "Alt+Up",
+    "move_down": "Alt+Down",
+    "save":          ["Alt+S", "Ctrl+S", "F10"],
+    "show_password": ["Alt+P", "F9"]
+  }
+}
+```
+
+| Anahtar | Nerede | Ne yapar | Varsayılan |
+|---------|--------|----------|------------|
+| `terminal` | her yer | SSH terminaline geç | `Alt+1` |
+| `files` | her yer | Dosya moduna geç | `Alt+2` |
+| `transfer` | dosya modu | Seçili dosyayı/klasörü karşı panele aktar | `Alt+T` · `F5` |
+| `edit` | dosya modu · yönetici | Dosyayı `fresh`'te aç · bağlantıyı düzenle | `Alt+E` · `F4` |
+| `quit` | dosya modu · yönetici | Çıkış (`Esc` de çalışır) | `Alt+Q` · `Ctrl+Q` · `F10` |
+| `new` | yönetici | Yeni bağlantı | `Alt+N` · `F5` · `Ins` |
+| `copy` | yönetici | Bağlantıyı çoğalt | `Alt+C` · `F6` |
+| `delete` | yönetici | Bağlantıyı sil (onay sorar) | `Alt+D` · `F8` · `Del` |
+| `move_up` / `move_down` | yönetici | Sırala | `Alt+↑` / `Alt+↓` |
+| `save` | düzenleme formu | Kaydet (`Enter` de çalışır) | `Alt+S` · `Ctrl+S` · `F10` |
+| `show_password` | düzenleme formu | Parolayı göster/gizle | `Alt+P` · `F9` |
+
+- Yazım: `Ctrl+`, `Alt+`, `Shift+` + tuş. Tuş bir harf/rakam/simge ya da
+  `F1`–`F24`, `Enter`, `Esc`, `Tab`, `Space`, `Backspace`, `Ins`, `Del`,
+  `Home`, `End`, `PgUp`, `PgDn`, `Up`/`Down`/`Left`/`Right` olabilir.
+  Büyük/küçük harf önemsiz. Bir eyleme liste ile birden fazla tuş verilebilir.
+- Harf ve rakamlar tek başına kısayol olamaz (arama kutusuna / kabuğa
+  giderler) — `Ctrl` ya da `Alt` ekleyin. **Aynı ekrandaki** iki eyleme aynı
+  tuş verilirse `tfs` açılışta hangi tuşun nerede çakıştığını söyleyip durur;
+  farklı ekranlarda paylaşmak serbest (varsayılanda `F5` dosya modunda
+  transfer, yöneticide yeni bağlantı).
+- Mod tuşları (`terminal`/`files`) terminal modunda **kabuğa iletilmez**;
+  seçtiğiniz kombinasyonu uzaktaki programlar göremez. F1/F2 artık mod tuşu
+  olmadığından kabuğa normal F-tuşu olarak gider (`mc`, `htop` vb. için).
+  Diğer kısayollar terminal modunda geçerli değildir — `Alt+T`, `Alt+E` gibi
+  tuşlar kabuğa gider (bash/zsh'ta kelime işlemleri).
+- Üst çubuktaki sekme adları ve ipuçları seçtiğiniz tuşları gösterir.
+
+**Neden F1/F2 değil — uzak masaüstü.** `tfs`'i AnyDesk, Radmin, RDP ya da
+TeamViewer ile bağlandığınız bir makinada çalıştırıyorsanız F-tuşları yolda
+kaybolabiliyor: bazı uzak masaüstü istemcileri ve yerel uygulamalar F-tuşlarını
+kendileri için yakalıyor (yardım, menü, tam ekran), dizüstülerde ise `Fn`
+kilidine göre F1 parlaklık/ses tuşuna dönüşüyor. `Alt+rakam` ise her
+terminalde tek bir kaçış dizisi olarak kodlanır, Windows Terminal'de varsayılan
+bir kısayola bağlı değildir ve uzak masaüstü istemcileri onu olduğu gibi iletir.
+
+Kendi ortamınızda sorun çıkarsa denenebilecek alternatifler:
+
+- `Ctrl+Alt+…` **kullanmayın**: Türkçe (ve çoğu Avrupa) klavyede `AltGr` =
+  `Ctrl+Alt`'tır; `Ctrl+Alt+Q` `@` yazar, kısayol hiç gelmez. RDP/AnyDesk de
+  `Ctrl+Alt+…`'ın bir kısmını kendine ayırır.
+- `Ctrl+rakam` **kullanmayın**: çoğu terminal `Ctrl+1`'i kodlayamaz, tuş
+  uygulamaya hiç ulaşmaz.
+- `Alt+F4` (pencereyi kapatır), `Alt+Enter` (Windows Terminal tam ekran),
+  `Alt+Space` (pencere menüsü) ve `Alt+Tab` işletim sistemine aittir,
+  kullanmayın.
+- Güvenli seçenekler: `Alt+rakam`, `Alt+harf` (varsayılanlar) ya da
+  `Ctrl+harf` — ama mod tuşu olarak `Ctrl+harf` terminal modunda kabuktan
+  çalınır (`Ctrl+D` = çıkış, `Ctrl+R` = geçmiş araması), dikkatli seçin.
+- Hangi tuşun gerçekten geldiğini görmek için `TFS_KEYLOG=tuslar.log tfs`
+  ile çalıştırıp dosyaya bakın.
+
 ## Sunucu anahtarı doğrulaması (known_hosts)
 
 tfs bağlanmadan önce sunucunun anahtarını `~/.ssh/known_hosts` ile doğrular —
@@ -171,19 +253,20 @@ cargo run -- sunucular.json  # farklı bir config yolu
 
 Açılışta sunucu listesi gelir → **fareyle tıkla = bağlan** (ya da ↑/↓ + Enter).
 
-## İki mod: F1 Terminal · F2 Dosya
+## İki mod: Alt+1 Terminal · Alt+2 Dosya
 
 Bağlandıktan sonra aynı SSH bağlantısı üzerinde iki mod arasında geçiş yapılır
 (yeniden bağlanma yok — tek bağlantı, iki kanal):
 
-- **F1 → SSH Terminali**: PuTTY / Windows Terminal benzeri, tam ekran interaktif
+- **Alt+1 → SSH Terminali**: PuTTY / Windows Terminal benzeri, tam ekran interaktif
   kabuk. ANSI/VT100 renkleri, imleç, `top`/`htop`/`vim` gibi tam ekran programlar
-  çalışır. İlk F1'de kabuk açılır ve uygulama boyunca canlı kalır.
-- **F2 → Dosya transferi**: iki panelli, fareyle sürükle-bırak SFTP tarayıcısı.
+  çalışır. Terminale ilk geçişte kabuk açılır ve uygulama boyunca canlı kalır.
+- **Alt+2 → Dosya transferi**: iki panelli, fareyle sürükle-bırak SFTP tarayıcısı.
 
-`F1`/`F2` **uygulama-global** kısayoldur; terminal modundayken kabuğa
+`Alt+1`/`Alt+2` **uygulama-global** kısayoldur; terminal modundayken kabuğa
 iletilmezler (diğer tüm tuşlar kabuğa gider). Terminalden çıkmak için kabukta
-`exit` yaz (dosya moduna döner) ya da `F2` → `q`.
+`exit` yaz (dosya moduna döner) ya da `Alt+2` → `Ctrl+Q`. Tuşlar
+`config.json`'dan değiştirilebilir — bkz. [Kısayolları değiştirme](#kısayolları-değiştirme).
 
 ### Terminal modunda kopyala / yapıştır / kaydır
 
@@ -230,9 +313,9 @@ promptlar ~1 sn bekleyip ekranı sıfırlıyordu.
 > Teşhis: `TFS_LOG=yol.txt` ortam değişkeniyle çalıştırırsanız sunucudan gelen ham
 > baytlar escape'lenmiş olarak o dosyaya yazılır (terminal sorunlarını incelemek için).
 
-## F4 — dosyayı `fresh` ile düzenle
+## Alt+E / F4 — dosyayı `fresh` ile düzenle
 
-Dosya modunda (F2) bir dosya seçip **F4** (ya da **`e`**) tuşuna basınca dosya
+Dosya modunda (Alt+2) bir dosya seçip **Alt+E** (ya da **F4**) tuşuna basınca dosya
 [`fresh`](https://github.com/sinelaw/fresh) editöründe açılır — VS Code / Sublime
 alışkanlıklarını terminale getiren, çoklu imleç ve LSP destekli bir editör.
 
@@ -253,29 +336,41 @@ editöre değil tfs'e giderdi); editör kapanınca arayüz geri gelir.
 
 ### `fresh` kurulu değilse
 
-tfs onu sizin için kurmayı önerir:
+tfs onu sizin için kurmayı önerir — **Rust/cargo kurulu olması gerekmez**:
 
 ```
-┌ Editör kurulumu ─────────────────────────────────┐
-│ fresh editörü bulunamadı.                        │
-│                                                  │
-│ Şimdi kurulsun mu? Çalıştırılacak:               │
-│   $ cargo binstall --no-confirm fresh-editor     │
-│                                                  │
-│  E / Enter  kur     H / Esc  vazgeç              │
-└──────────────────────────────────────────────────┘
+┌ Editör kurulumu ─────────────────────────────────────────────┐
+│ fresh editörü bulunamadı.                                    │
+│                                                              │
+│ Şimdi kurulsun mu? Yapılacak:                                │
+│   GitHub'dan hazır binary indir: fresh-editor-x86_64-pc-…zip │
+│     → C:\Users\…\AppData\Local\tfs\bin                       │
+│                                                              │
+│  E / Enter  kur     H / Esc  vazgeç                          │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-`cargo binstall` hazır derlenmiş binary'yi indirir (saniyeler). Sırayla denenir:
+Sırayla denenir:
 
-1. `cargo binstall --no-confirm fresh-editor` — `cargo-binstall` kuruluysa.
-2. Değilse önce `cargo install cargo-binstall`, sonra (1).
-3. O da olmazsa son çare `cargo install --locked fresh-editor` (kaynaktan
-   derler, uzun sürer).
+1. **Hazır binary** — fresh'in [GitHub sürümlerinden](https://github.com/sinelaw/fresh/releases)
+   bu makinaya uyan arşiv (`latest`) indirilir, yayınlanan **SHA-256 ile
+   doğrulanır**, açılır ve `fresh` şuraya kopyalanır:
+   - Windows: `%LOCALAPPDATA%\tfs\bin` (yönetici hakkı ya da PATH değişikliği gerekmez)
+   - Linux / macOS: `~/.local/bin`
+
+   İndirme ve açma için sistemdeki `curl` ve `tar` kullanılır; ikisi de
+   Windows 10 (1803+) ile birlikte gelir, Linux/macOS'ta hemen her zaman
+   kuruludur. Desteklenen: Windows x86_64/ARM64 (32-bit `tfs.exe` 64-bit
+   Windows'ta da 64-bit fresh'i kurar), Linux x86_64/aarch64 (statik musl),
+   macOS Intel/Apple Silicon, FreeBSD x86_64.
+2. Bu olmazsa ve **cargo kuruluysa**: `cargo binstall --no-confirm fresh-editor`
+   (gerekirse önce `cargo install cargo-binstall`), son çare
+   `cargo install --locked fresh-editor` (kaynaktan derler, uzun sürer).
 
 Kurulum çıktısı doğrudan terminalde akar. Kurulu bir `fresh`i tfs, `PATH`'e ek
-olarak `~/.cargo/bin` ve `~/.local/bin` altında da arar — böylece kurulumdan
-hemen sonra, kabuk yeniden başlatılmadan bulunur.
+olarak `~/.cargo/bin`, `~/.local/bin` ve (Windows'ta) `%LOCALAPPDATA%\tfs\bin`
+altında da arar — böylece kurulumdan hemen sonra, kabuk yeniden başlatılmadan
+bulunur.
 
 Editörü elle kurmak isterseniz:
 
@@ -294,11 +389,11 @@ cargo install --locked fresh-editor   # kaynaktan
 - **Tek tık**: dosya seçer; klasöre tıklamak içine girer.
 - **Tekerlek**: seçimi kaydırır.
 - **Klavye**: `Tab` panel değiştir, `Enter` gir, `Backspace` üst dizin,
-  `↑/↓` `PgUp/PgDn` `Home/End` gezin, `F5` transfer, `F4` düzenle,
-  `Esc`/`F10`/`Ctrl+Q` çıkış. **Yazmaya başlamak arama yapar** (aşağıya bakın).
-- **F1**: SSH terminaline geç · **F2**: dosya moduna dön. Üst çubuktaki
-  `F1 Terminal` / `F2 Dosya` sekmelerine **fareyle de tıklanabilir**.
-- **F4**: seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).
+  `↑/↓` `PgUp/PgDn` `Home/End` gezin, `Alt+T`/`F5` transfer, `Alt+E`/`F4` düzenle,
+  `Esc`/`Alt+Q`/`Ctrl+Q`/`F10` çıkış. **Yazmaya başlamak arama yapar** (aşağıya bakın).
+- **Alt+1**: SSH terminaline geç · **Alt+2**: dosya moduna dön. Üst çubuktaki
+  `Alt+1 Terminal` / `Alt+2 Dosya` sekmelerine **fareyle de tıklanabilir**.
+- **Alt+E** / **F4**: seçili dosyayı `fresh` editöründe aç (bkz. yukarıdaki bölüm).
 
 ## Bağlantı yöneticisi (açılış ekranı)
 
@@ -315,20 +410,20 @@ Açılışta `config.json`'daki bağlantılar listelenir ve **aynı ekranda** d�
 │                                       │   Anahtar      varsa.. │
 │                                       │   Parola       •••••   │
 └───────────────────────────────────────┴────────────────────────┘
- [ + Yeni (F5) ] [ Düzenle (F4) ] [ Kopyala (F6) ] [ Sil (F8) ] [ ↑ ] [ ↓ ]
- Enter / tıkla: bağlan · yaz: ara · Esc: çık · config.json
+ [ + Yeni (Alt+N) ] [ Düzenle (Alt+E) ] [ Kopyala (Alt+C) ] [ Sil (Alt+D) ] [ ↑ ] [ ↓ ]
+ Enter / tıkla: bağlan · yaz: ara · Alt+↑/Alt+↓: sırala · Esc: çık · config.json
 ```
 
 | İşlem | Fare | Klavye |
 |-------|------|--------|
 | Bağlan | satıra **tek tık** | `Enter` |
-| Yeni bağlantı | `[+ Yeni]` | `F5` · `Insert` |
-| Düzenle | `[Düzenle]` | `F4` |
-| Kopyala (çoğalt) | `[Kopyala]` | `F6` |
-| Sil | `[Sil]` | `F8` · `Delete` |
+| Yeni bağlantı | `[+ Yeni]` | `Alt+N` · `F5` · `Insert` |
+| Düzenle | `[Düzenle]` | `Alt+E` · `F4` |
+| Kopyala (çoğalt) | `[Kopyala]` | `Alt+C` · `F6` |
+| Sil | `[Sil]` | `Alt+D` · `F8` · `Delete` |
 | Sırala | `[↑]` `[↓]` | `Alt+↑` · `Alt+↓` |
 | Ara | — | doğrudan yazın |
-| Çık | — | `Esc` · `Ctrl+Q` · `F10` |
+| Çık | — | `Esc` · `Alt+Q` · `Ctrl+Q` · `F10` |
 
 Arama ad, host **ve** kullanıcı adını tarar — `root` ya da `10.0` yazmak da
 bulur. `Esc` önce aramayı temizler, arama yokken çıkar (panellerdeki davranışın
@@ -353,8 +448,8 @@ farklı olurdu.
 ```
 
 - `Tab` / `↑` `↓` alanlar arası; alana **tıklayarak** da geçebilirsiniz.
-- `Enter` (ya da `Ctrl+S` / `F10`) kaydeder, `Esc` vazgeçer.
-- **`F9` parolaları gösterir/gizler** — normalde `•` ile maskelidirler.
+- `Enter` (ya da `Alt+S` / `Ctrl+S` / `F10`) kaydeder, `Esc` vazgeçer.
+- **`Alt+P` (ya da `F9`) parolaları gösterir/gizler** — normalde `•` ile maskelidirler.
 - `Port` alanı yalnızca rakam alır. Boş bırakılırsa `22`, `Ad` boş bırakılırsa
   host adı kullanılır.
 - Parolanın başındaki/sonundaki boşluk **korunur** (diğer alanlar kırpılır).
@@ -400,6 +495,7 @@ gizlenir. Ayrı bir "arama moduna" girmeniz gerekmez.
 > **Not**: Arama yazılabilir tüm harfleri kullandığı için eski tek harfli
 > kısayollar (`q`, `t`, `e`) kaldırıldı. Yerlerine `Ctrl+Q`/`F10`/`Esc` (çıkış),
 > `F5` (transfer) ve `F4` (düzenle) geçti — Norton/Midnight Commander geleneği.
+> Bugün bunların önünde `Alt+Q` / `Alt+T` / `Alt+E` var (bkz. [Kısayolları değiştirme](#kısayolları-değiştirme)).
 
 ## Klasör transferi
 
@@ -433,7 +529,7 @@ Davranış:
 - SSH agent (`ssh-agent` / Pageant) desteklenmiyor; anahtar dosyadan okunur.
   Şifreli anahtarın parolası config'te düz metin durur.
 - OS dosya yöneticisi ↔ terminal DnD **mümkün değil** (terminal sınırı).
-- SSH terminali (F1): fare uzak programlara **iletilmez** (SGR mouse forwarding
+- SSH terminali (Alt+1): fare uzak programlara **iletilmez** (SGR mouse forwarding
   yok) — `htop`/`vim` içinde fare çalışmaz, fare seçme/kopyalama içindir.
   Seçim satır bazlıdır (blok/dikdörtgen seçim yok).
 
@@ -448,29 +544,34 @@ Davranış:
 
 **tfs** (*terminal-file-send*) is a mouse-first terminal UI that puts an **SFTP
 file browser** and a **full interactive SSH terminal** on a *single* SSH
-connection. Switch between them with `F1` / `F2` — no reconnect, no second
+connection. Switch between them with `Alt+1` / `Alt+2` (configurable) — no reconnect, no second
 session, no second tool.
 
 ### Features
 
-- **`F2` — two-pane file manager** (local ↔ remote). Transfer files *and whole
+- **`Alt+2` — two-pane file manager** (local ↔ remote). Transfer files *and whole
   folders* by dragging them with the mouse, or with a keystroke. Live progress,
   cancel with `Esc`.
-- **`F1` — a real terminal.** VT100 emulation, so `vim`, `htop` and other
+- **`Alt+1` — a real terminal.** VT100 emulation, so `vim`, `htop` and other
   full-screen programs work. Mouse text selection, clipboard copy/paste
   (right-click pastes), and 1000 lines of scrollback.
 - **Built-in connection manager.** Add, edit, duplicate, reorder, delete and
   search your servers without leaving the TUI. Unlike most SSH launchers it can
-  **store passwords** for you — masked on screen (`F9` reveals), written
+  **store passwords** for you — masked on screen (`Alt+P` / `F9` reveals), written
   atomically, and the file is `chmod 0600` on Unix. Prefer keys? Leave the
   password empty and point it at your private key instead.
-- **`F4` — edit a remote file** in the [`fresh`](https://github.com/sinelaw/fresh)
+- **`Alt+E` / `F4` — edit a remote file** in the [`fresh`](https://github.com/sinelaw/fresh)
   editor: tfs downloads it, opens the editor, and uploads it back when you save.
 - **Type to filter.** Start typing in any pane or in the connection list and it
   filters as you go — no separate search mode.
 - **Host key verification** against the same `~/.ssh/known_hosts` OpenSSH uses,
   plus publickey auth (`id_ed25519` → `id_ecdsa` → `id_rsa`, or a key you name).
   When auth fails it tells you *which* method failed and why.
+- **Remote-desktop friendly shortcuts.** Mode switching defaults to
+  `Alt+1` / `Alt+2` instead of `F1` / `F2`, which AnyDesk, Radmin, RDP and
+  laptop `Fn` layers tend to swallow. Every main shortcut can be rebound in the
+  `"keys"` section of `config.json`
+  (see [Kısayolları değiştirme](#kısayolları-değiştirme)).
 
 ### Install
 

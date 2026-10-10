@@ -9,6 +9,52 @@ Son güncelleme: 2026-09-15
 > **DURUM: Aşama 0–4 + bug düzeltmeleri tamam, çalışır durumda (clippy temiz).**
 > F1 SSH terminali + F2 dosya transferi entegre edildi.
 >
+> **2026-09-27 (Aşama 12 — değiştirilebilir kısayollar):**
+> - ✅ Yeni modül `src/keys.rs`: `config.json` → `"keys"` bölümü
+>   (`terminal`, `files`, `transfer`, `edit`, `quit`; tek tuş ya da liste).
+>   Açılışta `keys::install`, her yerden `keys::get()` (OnceLock — haritayı
+>   tüm ekranlara parametre olarak taşımamak için).
+> - ⚠ **Varsayılan mod tuşları değişti: F1/F2 → `Alt+1`/`Alt+2`.** Sebep:
+>   AnyDesk/Radmin/RDP ve dizüstü `Fn` katmanı F-tuşlarını yutabiliyor.
+>   F1/F2 artık kabuğa `ESC O P` / `ESC O Q` olarak iletiliyor.
+> - 2. tur (2026-09-28): **tüm varsayılanlar önce `Alt+…`**, F-tuşu yedek:
+>   `transfer` Alt+T/F5, `edit` Alt+E/F4, `quit` Alt+Q/Ctrl+Q/F10. Bağlantı
+>   yöneticisi de keymap'e bağlandı: `new` Alt+N/F5/Ins, `copy` Alt+C/F6,
+>   `delete` Alt+D/F8/Del, `move_up/down` Alt+↑/↓, formda `save`
+>   Alt+S/Ctrl+S/F10, `show_password` Alt+P/F9. `Alt+F4/Enter/Space/Tab`
+>   OS'a ait — kullanılmadı.
+> - Çakışma kontrolü **ekran bazında** (dosya modu / liste / form + her
+>   birine mod tuşları): F5 hem transfer hem new olabiliyor.
+> - Formda `Char(c) if ctrl == alt` → Alt+harf alana yazılmıyor ama AltGr
+>   (Windows'ta Ctrl+Alt diye gelir: `@`, `{`, `[`) yazılıyor.
+> - Araç çubuğunda ↑/↓ düğmeleri kısayolsuz (Alt'lı etiketlerle 80 sütuna
+>   sığmıyordu); sıralama tuşu durum satırında.
+> - Kurallar: düz harf/rakam kısayol olamaz (aramayı/kabuğu çalar),
+>   `Shift+simge` reddedilir (simgenin kendisi yazılmalı), eylemler arası
+>   çakışma açılışta hata. `normalize` terminaller arası farkı (Ctrl+Shift+T'nin
+>   `'T'+CTRL` ya da `'T'+CTRL|SHIFT` gelmesi, BackTab) düzeltiyor.
+> - Bağlantı yöneticisi config'i yazarken `keys` bölümünü **ham hâliyle**
+>   koruyor (`Keymap::source`).
+> - Sekme etiketleri ve ipuçları seçili tuşlardan üretiliyor (`tab_labels`).
+> - Elle denenmeli: AnyDesk/Radmin üzerinden `Alt+1`/`Alt+2` ve Alt+harfler.
+>
+> **2026-10-11 — bağlanma hatası artık programı kapatmıyor.** Kullanıcı
+> "bağlanırken çöktü" dedi; panik değildi: yeni kayıtta parola bir rakam
+> yanlıştı, `app_flow` hatayı `?` ile yukarı fırlatıp TUI'yi kapatıyordu.
+> Artık `connect_and_load` hatası yöneticiye döner (`picker::run`'a `notice`
+> + `start`): kırmızı durum satırı, imleç o bağlantıda, ilk tuşta kalkar.
+> Host key reddi de çıkmak yerine listeye döner.
+>
+> **2026-10-11 — fresh kurulumu Rust'sız.** `editor::install` önce
+> GitHub'daki hazır arşivi dener (`RELEASES/latest/download/<ad>`, adlar
+> sürümsüz): sistem `curl` + `tar` (Windows'ta **System32\tar.exe** — Git'in
+> GNU tar'ı zip açamıyor), yayınlanan `.sha256` ile doğrulama (`sha2`, russh
+> zaten çekiyordu), kurulum `%LOCALAPPDATA%\tfs\bin` / `~/.local/bin`
+> (`locate` oraya da bakıyor). Olmazsa eski cargo yolu. Mimari WOW64'te
+> `PROCESSOR_ARCHITEW6432`'den. Uçtan uca test `#[ignore]`'lu:
+> `cargo test hazir_binary -- --ignored --nocapture` (Windows'ta geçti,
+> `fresh 0.5.2`). Linux yolu elle denenmedi.
+>
 > **2026-09-15 yapılanlar (Aşama 11 — bağlantı yöneticisi):**
 > - ✅ Açılış ekranı artık **bağlantı yöneticisi**: ekle / düzenle / kopyala /
 >   sil / sırala + arama, hepsi TUI içinde. `config.json`ı elle açmak bitti.
