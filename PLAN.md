@@ -483,7 +483,7 @@ ile yan yana derlenir). Cargo.toml'da bu sürümler sabitlendi; yükseltirken di
 ---
 
 ## 7. Sıradaki adım
-> **v0.7.1** (2026-10-11): AltGr + seçim düzeltmeleri — `cargo publish` kullanıcıda.
+> **v0.7.1 yayınlandı** (2026-10-11): AltGr + seçim düzeltmeleri — GitHub + crates.io.
 > **v0.7.0 yayınlandı** (2026-10-11): Alt kısayollar, Rust'sız fresh.
 > **v0.6.0 yayınlandı** (2026-09-15): bağlantı yöneticisi + uygulama ikonu.
 > Adımlar "## 12"deki sıraya göre yapıldı (commit → dry-run → etiket → push →
@@ -707,7 +707,7 @@ tekerlekle kaydırınca kaybolan seçim. Notlar: `dist/RELEASE-v0.7.1.md`.
 - Binary'ler `--target-dir target\dist` ile derlendi (açık `tfs.exe`
   `target/release`'i kilitliyordu).
 - [x] test 65 + clippy temiz · üç binary · dry-run · etiket · push · release
-- [ ] `cargo publish` — kullanıcı
+- [x] `cargo publish` — kullanıcı çalıştırdı; crates.io `55586d5`ten (doğrulandı)
 
 ### v0.7.0 (2026-10-11)
 
