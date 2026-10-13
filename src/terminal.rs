@@ -8,7 +8,9 @@
 //! taşınır (UI bloklanmaz). Yazma yarısı (`ChannelWriteHalf`) ana döngüde tutulur.
 
 use anyhow::{Context, Result};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -493,6 +495,58 @@ impl TermSession {
     pub async fn send_bytes(&mut self, bytes: Vec<u8>) {
         let _ = self.writer.data_bytes(bytes).await;
     }
+
+    /// Fare olayı uzaktaki uygulamaya mı gidecek? Öyleyse gönderir ve `true`
+    /// döner; `false` ise olay yerelde (seçim / kaydırma tamponu) işlenmeli.
+    /// Gerçek terminallerin kuralı:
+    ///
+    /// - Uygulama fare takibi açtıysa (claude, vim `mouse=a`, htop, mc) olay
+    ///   ona gider. **Shift** basılıysa her zaman yerelde kalır — seçip
+    ///   kopyalamak yine mümkün.
+    /// - Takip yok ama alternatif ekrandaysa (less, man, vim) tekerlek ok
+    ///   tuşlarına çevrilir; alternatif ekranın kaydırma tamponu yoktur.
+    /// - Aksi hâlde yerel kaydırma tamponu.
+    ///
+    /// `m.row` **ekran** satırıdır (0 = üst çubuk).
+    pub async fn route_mouse(&mut self, m: &MouseEvent) -> bool {
+        if m.modifiers.contains(KeyModifiers::SHIFT) || self.selection.is_some_and(|s| s.dragging)
+        {
+            return false;
+        }
+        let scroll = matches!(m.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown);
+        // Üst çubuğa basma/tekerlek yerelde; uygulamaya giden bir sürükleme
+        // ise oraya taşsa da kenara kırpılıp uygulamada kalır.
+        if m.row == 0 && (scroll || matches!(m.kind, MouseEventKind::Down(_))) {
+            return false;
+        }
+        let screen = self.parser.screen();
+        let mode = screen.mouse_protocol_mode();
+        let bytes = if mode != vt100::MouseProtocolMode::None {
+            let (row, col) = self.clamp(m.row.saturating_sub(1), m.column);
+            encode_mouse(m, mode, screen.mouse_protocol_encoding(), row, col)
+        } else if scroll && screen.alternate_screen() {
+            let key: &[u8] = match (m.kind == MouseEventKind::ScrollUp, screen.application_cursor()) {
+                (true, true) => b"\x1bOA",
+                (true, false) => b"\x1b[A",
+                (false, true) => b"\x1bOB",
+                (false, false) => b"\x1b[B",
+            };
+            Some(key.repeat(SCROLL_STEP))
+        } else {
+            return false;
+        };
+        if let Some(b) = bytes {
+            self.clear_selection();
+            self.scroll_reset();
+            let _ = self.writer.data_bytes(b).await;
+        }
+        true
+    }
+
+    /// Uygulama fareyi kendisi istiyor mu (üst çubukta ipucu için).
+    pub fn app_wants_mouse(&self) -> bool {
+        self.parser.screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None
+    }
 }
 
 /// Gelen bayt akışında terminal sorgularını tarar ve yanıtlarını `out`'a ekler.
@@ -615,6 +669,73 @@ fn encode_key(key: &KeyEvent) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Fare olayını, uygulamanın istediği protokolde (xterm) kodlar. `row`/`col`
+/// 0-tabanlı grid koordinatı. Uygulamanın istemediği olay türü (ör. yalnız
+/// basma isteyene bırakma) `None`.
+///
+/// Düğme kodu: sol 0, orta 1, sağ 2, bırakma 3 (SGR dışı), tekerlek 64/65,
+/// hareket +32; Shift +4, Alt +8, Ctrl +16.
+fn encode_mouse(
+    m: &MouseEvent,
+    mode: vt100::MouseProtocolMode,
+    enc: vt100::MouseProtocolEncoding,
+    row: u16,
+    col: u16,
+) -> Option<Vec<u8>> {
+    use vt100::MouseProtocolMode as M;
+    let btn = |b: MouseButton| match b {
+        MouseButton::Left => 0u32,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    let (mut code, release) = match m.kind {
+        MouseEventKind::Down(b) => (btn(b), false),
+        MouseEventKind::Up(b) if mode != M::Press => (btn(b), true),
+        MouseEventKind::Drag(b) if matches!(mode, M::ButtonMotion | M::AnyMotion) => {
+            (btn(b) + 32, false)
+        }
+        MouseEventKind::Moved if mode == M::AnyMotion => (3 + 32, false),
+        MouseEventKind::ScrollUp => (64, false),
+        MouseEventKind::ScrollDown => (65, false),
+        MouseEventKind::ScrollLeft => (66, false),
+        MouseEventKind::ScrollRight => (67, false),
+        _ => return None,
+    };
+    if m.modifiers.contains(KeyModifiers::SHIFT) {
+        code += 4;
+    }
+    if m.modifiers.contains(KeyModifiers::ALT) {
+        code += 8;
+    }
+    if m.modifiers.contains(KeyModifiers::CONTROL) {
+        code += 16;
+    }
+    let (x, y) = (u32::from(col) + 1, u32::from(row) + 1);
+    match enc {
+        vt100::MouseProtocolEncoding::Sgr => {
+            let end = if release { 'm' } else { 'M' };
+            Some(format!("\x1b[<{code};{x};{y}{end}").into_bytes())
+        }
+        // Eski kodlamalarda bırakma düğmesizdir (3) ve her değer 32 kaydırılır.
+        legacy => {
+            if release {
+                code |= 3;
+            }
+            let mut out = b"\x1b[M".to_vec();
+            for v in [code + 32, x + 32, y + 32] {
+                if legacy == vt100::MouseProtocolEncoding::Utf8 {
+                    let c = char::from_u32(v.min(2047))?;
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                } else {
+                    out.push(v.min(255) as u8);
+                }
+            }
+            Some(out)
+        }
+    }
+}
+
 /// Terminal modunu çizer: üst mod/başlık çubuğu + tam ekran sözde-terminal.
 pub fn draw(f: &mut Frame, sess: &TermSession, server_name: &str) {
     let root = Layout::default()
@@ -630,6 +751,8 @@ pub fn draw(f: &mut Frame, sess: &TermSession, server_name: &str) {
     } else if scrolled > 0 {
         scroll_note = format!("⇡ {scrolled} satır geride (Enter/yazınca canlıya döner)");
         Some(scroll_note.as_str())
+    } else if sess.app_wants_mouse() {
+        Some("fare uygulamada · Shift+sürükle: seç, Shift+sağ tık: yapıştır")
     } else {
         None
     };
@@ -858,5 +981,51 @@ mod tests {
             assert_eq!(encode_key(&tus(c, KeyModifiers::NONE)).as_deref(), Some(b));
             assert_eq!(encode_key(&tus(c, KeyModifiers::SHIFT)).as_deref(), Some(b));
         }
+    }
+
+    fn fare(kind: MouseEventKind, mods: KeyModifiers) -> MouseEvent {
+        MouseEvent { kind, column: 0, row: 0, modifiers: mods }
+    }
+
+    #[test]
+    fn fare_sgr_kodlamasi() {
+        use vt100::{MouseProtocolEncoding as E, MouseProtocolMode as M};
+        let k = |kind, mods| encode_mouse(&fare(kind, mods), M::ButtonMotion, E::Sgr, 4, 9);
+        let none = KeyModifiers::NONE;
+        assert_eq!(k(MouseEventKind::Down(MouseButton::Left), none).unwrap(), b"\x1b[<0;10;5M");
+        assert_eq!(k(MouseEventKind::Up(MouseButton::Left), none).unwrap(), b"\x1b[<0;10;5m");
+        assert_eq!(k(MouseEventKind::Drag(MouseButton::Left), none).unwrap(), b"\x1b[<32;10;5M");
+        assert_eq!(k(MouseEventKind::ScrollUp, none).unwrap(), b"\x1b[<64;10;5M");
+        assert_eq!(k(MouseEventKind::ScrollDown, KeyModifiers::CONTROL).unwrap(), b"\x1b[<81;10;5M");
+        // Düğmesiz hareketi yalnız AnyMotion ister.
+        assert!(k(MouseEventKind::Moved, none).is_none());
+    }
+
+    #[test]
+    fn fare_eski_kodlama_ve_mod_suzgeci() {
+        use vt100::{MouseProtocolEncoding as E, MouseProtocolMode as M};
+        let up = fare(MouseEventKind::Up(MouseButton::Right), KeyModifiers::NONE);
+        assert_eq!(encode_mouse(&up, M::PressRelease, E::Default, 0, 0).unwrap(), b"\x1b[M\x23\x21\x21");
+        // X10 (yalnız basma) bırakmayı ve sürüklemeyi bildirmez.
+        assert!(encode_mouse(&up, M::Press, E::Default, 0, 0).is_none());
+        let drag = fare(MouseEventKind::Drag(MouseButton::Left), KeyModifiers::NONE);
+        assert!(encode_mouse(&drag, M::PressRelease, E::Default, 0, 0).is_none());
+        // Geniş ekranda UTF-8 kodlaması 223'ü aşan sütunu taşıyabilir.
+        let down = fare(MouseEventKind::Down(MouseButton::Left), KeyModifiers::NONE);
+        let b = encode_mouse(&down, M::Press, E::Utf8, 0, 299).unwrap();
+        assert_eq!(String::from_utf8(b[3..].to_vec()).unwrap().chars().nth(1), Some('\u{14c}'));
+    }
+
+    /// vt100, uygulamanın açtığı fare takibini ve alternatif ekranı izliyor.
+    #[test]
+    fn uygulama_fare_istegi_izlenir() {
+        let mut p = vt100::Parser::new(10, 20, SCROLLBACK);
+        assert_eq!(p.screen().mouse_protocol_mode(), vt100::MouseProtocolMode::None);
+        p.process(b"\x1b[?1049h\x1b[?1002h\x1b[?1006h");
+        assert!(p.screen().alternate_screen());
+        assert_eq!(p.screen().mouse_protocol_mode(), vt100::MouseProtocolMode::ButtonMotion);
+        assert_eq!(p.screen().mouse_protocol_encoding(), vt100::MouseProtocolEncoding::Sgr);
+        p.process(b"\x1b[?1002l\x1b[?1049l");
+        assert_eq!(p.screen().mouse_protocol_mode(), vt100::MouseProtocolMode::None);
     }
 }

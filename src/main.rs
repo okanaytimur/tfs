@@ -387,6 +387,9 @@ async fn run(
                                         // Fareyle metin seçme (grid satırı = ekran satırı - 1,
                                         // üst çubuk için). Bırakınca panoya kopyalanır.
                                         // Sağ tık → panodan yapıştır (PuTTY alışkanlığı).
+                                        // Fare takibi açan uygulama (claude, vim,
+                                        // htop) olayı kendisi alır; bkz. `route_mouse`.
+                                        Event::Mouse(m) if t.route_mouse(&m).await => {}
                                         Event::Mouse(m) => match m.kind {
                                             MouseEventKind::Down(MouseButton::Left) if m.row >= 1 => {
                                                 t.sel_start(m.row - 1, m.column);
